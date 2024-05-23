@@ -11,10 +11,11 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=10000, climate_risk_exposure = 0.5):
+    def __init__(self, capital=10000, climate_risk_exposure = 0.5, beta = 0.1667):
         self.initial_capital = capital      # initial capital
         self.capital = capital              # current capital
-        
+        self.beta = beta                    # Beta risk factor against market performance
+
         self.initial_climate_risk_exposure \
             = climate_risk_exposure         # initial climate risk exposure
         self.climate_risk_exposure \
@@ -39,9 +40,13 @@ class Company:
         """Make a decision on how to allocate capital."""
         self.strategy = strategy
         if strategy == 1:
-            self.invest_in_esg(self.capital*0.05)  # TODO: this is a hardcoded value, should be a parameter
+            self.invest_in_esg(self.capital*0.05)  
+            # TODO: this is a hardcoded value, should be a parameter;
+            # also if hardcode is to be changed, should change in update_capital function as well
         elif strategy == 2:
-            self.invest_in_greenwash(self.capital*0.01)  # TODO: this is a hardcoded value, should be a parameter
+            self.invest_in_greenwash(self.capital*0.01)  
+            # TODO: this is a hardcoded value, should be a parameter
+            # also if hardcode is to be changed, should change in update_capital function as well
         else:
             self.esg_score = 0
 
@@ -62,13 +67,25 @@ class Company:
     def update_capital(self, environment):
         """Update the capital based on market performance and climate event."""
         # add a random disturbance to market performance
-        company_performance = environment.market_performance * np.random.normal(loc=1.0, scale=0.1667) 
+        company_performance = np.random.normal(loc=environment.market_performance, scale=self.beta) 
         # ranges from 0.5 to 1.5 of market performance baseline most of time
         new_capital = self.capital * company_performance
         if environment.climate_event_occurred:
             new_capital *= (1 - self.climate_risk_exposure)
-        self.capital_gain = new_capital - self.capital
-        self.margin = self.capital_gain/self.capital
+
+        # backout the original capital based on esg investment
+        if self.strategy == 1:
+            base_capital = self.capital / 0.95 
+            # TODO: this is a hardcoded value, should be a parameter; 
+            # also if hardcode is to be changed, should change in make_decision function as well
+        elif self.strategy == 2:
+            base_capital = self.capital / 0.99
+        else:
+            base_capital = self.capital
+        
+        # calculate margin and capital gain
+        self.capital_gain = new_capital - base_capital # ending capital - starting capital
+        self.margin = self.capital_gain/base_capital
         self.capital = new_capital
         
     
@@ -83,7 +100,7 @@ class Company:
         self.esg_score = None
     
 class Investor:
-    def __init__(self, esg_preference, capital=10000):
+    def __init__(self, capital=10000, esg_preference=0.5):
         self.initial_capital = capital      # initial capital
         self.capital = capital              # current capital
         self.investments = {}               # dictionary to track investments in different companies
@@ -148,26 +165,37 @@ class InvestESG(ParallelEnv):
 
     def __init__(
         self,
+        company_attributes=None,
+        investor_attributes=None,
         num_companies=10,
         num_investors=10,
-        company_starting_capital=10000,
-        investor_starting_capital=10000,
-        investor_esg_preference=0.5,
         initial_climate_event_probability=0.1,
         max_steps=100,
-        egocentric=False, # TODO: what is this? Do we need it?
-        cnn=False
+        market_performance_baseline=1.1, 
+        market_performance_variance=0.0
     ):
         self.max_steps = max_steps
         self.timestamp = 0
 
-        self.num_companies = num_companies
-        self.num_investors = num_investors
-        self.companies = [Company(capital = company_starting_capital) for _ in range(num_companies)]
-        self.investors = [Investor(investor_esg_preference, investor_starting_capital) for _ in range(num_investors)]
+        # initialize companies and investors based on attributes if not None
+        if company_attributes is not None:
+            self.companies = [Company(**attributes) for attributes in company_attributes]
+            self.num_companies = len(company_attributes)
+        else:
+            self.companies = [Company() for _ in range(num_companies)]
+            self.num_companies = num_companies
+        
+        if investor_attributes is not None:
+            self.investors = [Investor(**attributes) for attributes in investor_attributes]
+            self.num_investors = len(investor_attributes)
+        else:
+            self.num_investors = num_investors
+            self.investors = [Investor() for _ in range(num_investors)]
+        
         self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
 
-        self.market_performance = 1 # initial market performance
+        self.market_performance_baseline = market_performance_baseline # initial market performance
+        self.market_performance_variance = market_performance_variance # variance of market performance
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurred = False # whether a climate event has occurred in the current step
@@ -181,8 +209,11 @@ class InvestESG(ParallelEnv):
             "climate_risk": [],
             "climate_event_occurs": [],
             "market_performance": [],
+            "market_total_wealth": [],
             "company_capitals": [[] for _ in range(num_companies)],
+            "company_climate_risk": [[] for _ in range(num_companies)],
             "investor_capitals": [[] for _ in range(num_investors)],
+            "investor_utility": [[] for _ in range(num_investors)],
             "investment_matrix": np.zeros((num_investors, num_companies)),
             "company_decisions": [[] for _ in range(num_companies)]
         }
@@ -209,9 +240,10 @@ class InvestESG(ParallelEnv):
 
     def step(self, actions):
         """Step function for the environment."""
-        # Initialize random number generator
-        rng1 = np.random.default_rng(0) # For market performance
-        rng2 = np.random.default_rng(1) # For climate event
+
+        ## Temporary Code: TO BE REMOVED LATER
+        rng1 = np.random.default_rng(self.timestamp)
+        rng2 = np.random.default_rng(self.timestamp*1000)
 
         ## unpack actions
         # first num_companies actions are for companies, the rest are for investors
@@ -255,7 +287,7 @@ class InvestESG(ParallelEnv):
         self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_esg_investment)
 
         # 4. market performance and climate event evolution
-        self.market_performance = rng1.normal(loc=1.0, scale=0.0333)   # ranges from 0.9 to 1.1 most of time
+        self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
         # TODO: consider other distributions and time-correlation of market performance
         self.climate_event_occurred = rng2.random() < self.climate_event_probability
 
@@ -302,8 +334,11 @@ class InvestESG(ParallelEnv):
             "climate_risk": [],
             "climate_event_occurs": [],
             "market_performance": [],
+            "market_total_wealth": [], 
             "company_capitals": [[] for _ in range(self.num_companies)],
+            "company_climate_risk": [[] for _ in range(self.num_companies)],
             "investor_capitals": [[] for _ in range(self.num_investors)],
+            "investor_utility": [[] for _ in range(self.num_investors)],
             "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
             "company_decisions": [[] for _ in range(self.num_companies)]
         }
@@ -341,11 +376,14 @@ class InvestESG(ParallelEnv):
         self.history["climate_risk"].append(self.climate_event_probability)
         self.history["climate_event_occurs"].append(self.climate_event_occurred)
         self.history["market_performance"].append(self.market_performance)
+        self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.capital for investor in self.investors))
         for i, company in enumerate(self.companies):
             self.history["company_capitals"][i].append(company.capital)
             self.history["company_decisions"][i].append(company.strategy)
+            self.history["company_climate_risk"][i].append(company.climate_risk_exposure)
         for i, investor in enumerate(self.investors):
             self.history["investor_capitals"][i].append(investor.capital+sum(investor.investments.values()))
+            self.history["investor_utility"][i].append(investor.utility)
             for j, investment in investor.investments.items():
                 self.history["investment_matrix"][i, j] += investment
 
@@ -358,9 +396,9 @@ class InvestESG(ParallelEnv):
         
         if not hasattr(self, 'fig') or self.fig is None:
             # Initialize the plot only once
-            self.fig = Figure(figsize=(12, 25))
+            self.fig = Figure(figsize=(12, 40))
             self.canvas = FigureCanvas(self.fig)
-            self.ax = self.fig.subplots(5, 1)
+            self.ax = self.fig.subplots(8, 1)
             plt.subplots_adjust(hspace=0.5)
             plt.ion()  # Turn on interactive mode for plotting
 
@@ -378,40 +416,44 @@ class InvestESG(ParallelEnv):
 
         ax1.plot(self.history["esg_investment"], label='Cumulative ESG Investment', color='blue')
         ax2.plot(self.history["climate_risk"], label='Climate Risk', color='orange')
+        # Add vertical lines for climate events
+        for i, event in enumerate(self.history["climate_event_occurs"]):
+            if event:
+                ax1.axvline(x=i, color='red', linestyle='--', alpha=0.5)
 
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
         ax2.set_ylabel('Climate Event Probability')
-        ax2.set_ylim(0, 0.1)  # Set limits for Climate Event Probability
+        ax2.set_ylim(0, 0.11)  # Set limits for Climate Event Probability
 
         ax1.legend(loc='upper left')
         ax2.legend(loc='upper right')
 
-        # Subplot 2: Company Capitals over time
-        for i, capital_history in enumerate(self.history["company_capitals"]):
-            self.ax[1].plot(capital_history, label=f'Company {i}')
-        self.ax[1].set_title('Company Capitals Over Time')
-        self.ax[1].set_ylabel('Capital')
+        # Subplot 2: Company Decisions
+        for i, decision_history in enumerate(self.history["company_decisions"]):
+            self.ax[1].plot(decision_history, label=f'Company {i}', linestyle='None', marker='o')
+        self.ax[1].set_title('Company Decisions Over Time')
+        self.ax[1].set_ylabel('Decision')
         self.ax[1].set_xlabel('Timestep')
+        self.ax[1].set_yticks([0, 1, 2])
+        self.ax[1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
         self.ax[1].legend()
 
-        # Subplot 3: Investor Capitals over time
-        for i, capital_history in enumerate(self.history["investor_capitals"]):
-            self.ax[2].plot(capital_history, label=f'Investor {i}')
-        self.ax[2].set_title('Investor Capitals Over Time')
-        self.ax[2].set_ylabel('Capital')
+        # Subplot 3: Company Climate risk exposure over time
+        for i, climate_risk_history in enumerate(self.history["company_climate_risk"]):
+            self.ax[2].plot(climate_risk_history, label=f'Company {i}')
+        self.ax[2].set_title('Company Climate Risk Over Time')
+        self.ax[2].set_ylabel('Climate Risk')
         self.ax[2].set_xlabel('Timestep')
         self.ax[2].legend()
 
-        # Subplot 4: Company Decisions
-        for i, decision_history in enumerate(self.history["company_decisions"]):
-            self.ax[3].plot(decision_history, label=f'Company {i}', linestyle='None', marker='o')
-        self.ax[3].set_title('Company Decisions Over Time')
-        self.ax[3].set_ylabel('Decision')
+        # Subplot 4: Company Capitals over time
+        for i, capital_history in enumerate(self.history["company_capitals"]):
+            self.ax[3].plot(capital_history, label=f'Company {i}')
+        self.ax[3].set_title('Company Capitals Over Time')
+        self.ax[3].set_ylabel('Capital')
         self.ax[3].set_xlabel('Timestep')
-        self.ax[3].set_yticks([0, 1, 2])
-        self.ax[3].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
         self.ax[3].legend()
 
         # Subplot 5: Investment Matrix
@@ -422,6 +464,30 @@ class InvestESG(ParallelEnv):
         ax.set_title('Investment Matrix')
         ax.set_ylabel('Investor ID')
         ax.set_xlabel('Company ID')
+
+         # Subplot 6: Investor Capitals over time
+        for i, capital_history in enumerate(self.history["investor_capitals"]):
+            self.ax[5].plot(capital_history, label=f'Investor {i}')
+        self.ax[5].set_title('Investor Capitals Over Time')
+        self.ax[5].set_ylabel('Capital')
+        self.ax[5].set_xlabel('Timestep')
+        self.ax[5].legend()
+
+        # Subplot 7: Investor Utility over time
+        for i, utility_history in enumerate(self.history["investor_utility"]):
+            self.ax[6].plot(utility_history, label=f'Investor {i}')
+        self.ax[6].set_title('Investor Utility Over Time')
+        self.ax[6].set_ylabel('Utility')
+        self.ax[6].set_xlabel('Timestep')
+        self.ax[6].legend()
+
+        # Subplot 8: Market Total Wealth over time
+        self.ax[7].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
+        self.ax[7].set_title('Market Total Wealth Over Time')
+        self.ax[7].set_ylabel('Total Wealth')
+        self.ax[7].set_xlabel('Timestep')
+        self.ax[7].legend()
+
 
         # Update the plots
         self.canvas.draw()
