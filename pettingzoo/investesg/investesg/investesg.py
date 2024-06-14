@@ -192,7 +192,7 @@ class InvestESG(ParallelEnv):
             self.num_investors = num_investors
             self.investors = [Investor() for _ in range(num_investors)]
         
-        self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
+        self.possible_agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
 
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
@@ -301,7 +301,7 @@ class InvestESG(ParallelEnv):
 
         # 7. termination and truncation
         self.timestamp += 1
-        termination = {agent: self.timestamp >= self.max_steps for agent in self.agents}
+        termination = {agent: self.timestamp >= self.max_steps for agent in self.possible_agents}
         truncation = termination
 
         observations = self._get_observation()
@@ -312,7 +312,7 @@ class InvestESG(ParallelEnv):
         self._update_history()
         
         if any(termination.values()):
-            self.agents = []
+            self.possible_agents = []
         
         # 8. update observation for each company and investor
         return observations, rewards, termination, truncation, infos
@@ -323,7 +323,7 @@ class InvestESG(ParallelEnv):
             company.reset()
         for investor in self.investors:
             investor.reset()
-        self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
+        self.possible_agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
         self.market_performance = 1
         self.climate_event_probability = self.initial_climate_event_probability
         self.climate_event_occurred = False
@@ -367,7 +367,7 @@ class InvestESG(ParallelEnv):
     
     def _get_infos(self):
         """Get infos for all agents. Dummy infos for compatibility with pettingzoo."""
-        infos = {agent: {} for agent in self.agents}
+        infos = {agent: {} for agent in self.possible_agents}
         return infos
 
     def _update_history(self):
