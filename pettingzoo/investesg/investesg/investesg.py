@@ -1,5 +1,5 @@
 from pettingzoo import ParallelEnv
-from gymnasium.spaces import Discrete, MultiDiscrete
+from gymnasium.spaces import Discrete, MultiDiscrete, Box
 import functools
 
 import numpy as np
@@ -26,7 +26,7 @@ class Company:
         self.margin = 0                     # single period profit margin
         self.capital_gain = 0               # single period capital gain
         self.strategy = None                # 1: "mitigation", 2: "greenwashing", 0: "none"
-        self.esg_score = None               # signal to be broadcasted to investors: "esg-friendly":1, "none":0
+        self.esg_score = 0               # signal to be broadcasted to investors: "esg-friendly":1, "none":0
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -97,7 +97,7 @@ class Company:
         self.margin = 0
         self.capital_gain = 0
         self.strategy = None
-        self.esg_score = None
+        self.esg_score = 0
     
 class Investor:
     def __init__(self, capital=10000, esg_preference=0.5):
@@ -193,7 +193,7 @@ class InvestESG(ParallelEnv):
             self.investors = [Investor() for _ in range(num_investors)]
         
         self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
-
+        self.possible_agents = self.agents[:]
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
@@ -223,7 +223,6 @@ class InvestESG(ParallelEnv):
     def action_space(self, agent):
         # each company has 3 possible actions: "mitigation", "greenwashing", "none"
         # each investor has num_companies possible*2 actions: for each company, invest/not invest
-
         # if agent is a company
         if agent.startswith("company"):
             return Discrete(3)
@@ -235,8 +234,9 @@ class InvestESG(ParallelEnv):
     def observation_space(self, agent):
         # all agents have access to the same information, namely the capital, climate risk exposure, ESG score, and margin of each company
         # of all companies and the investment in each company and remaining capital of each investor
-        observation = MultiDiscrete([4]*self.num_companies + [self.num_companies+1]*self.num_investors)
-        return observation
+        observation_size = self.num_companies * 4 + self.num_investors * (self.num_companies + 1)
+        observation_space = Box(low=-np.inf, high=np.inf, shape=(observation_size,))
+        return observation_space
 
     def step(self, actions):
         """Step function for the environment."""
@@ -349,18 +349,24 @@ class InvestESG(ParallelEnv):
     
     def _get_observation(self):
         """Get observation for each company and investor. Public information is shared across all agents."""
-        observations = {}
-        for i, company in enumerate(self.companies):
-            observations[f"company_{i}"] = np.array([company.capital, company.climate_risk_exposure, company.esg_score, company.margin])
-        for i, investor in enumerate(self.investors):
-            observations[f"investor_{i}"] = np.array(list(investor.investments.values()) + [investor.capital])
-        return observations
+        # Collect company observations
+        company_obs = []
+        for company in self.companies:
+            company_obs.extend([company.capital, company.climate_risk_exposure, company.esg_score, company.margin])
+        # Collect investor observations
+        investor_obs = []
+        for investor in self.investors:
+            investor_obs.extend(list(investor.investments.values()) + [investor.capital])
+        full_obs = np.array(company_obs + investor_obs)
+
+        # Return the same observation for all agents
+        return {agent: full_obs for agent in self.agents}
 
     def _get_reward(self):
         """Get reward for all agents."""
         rewards = {}
         for i, company in enumerate(self.companies):
-            rewards[f"company_{i}"] = company.capital_gain
+            rewards[f"company_{i}"] = company.capital_gain #TODO: ideally, we should remove investor principals from company capitals
         for i, investor in enumerate(self.investors):
             rewards[f"investor_{i}"] = investor.utility
         return rewards
@@ -396,10 +402,10 @@ class InvestESG(ParallelEnv):
         
         if not hasattr(self, 'fig') or self.fig is None:
             # Initialize the plot only once
-            self.fig = Figure(figsize=(12, 40))
+            self.fig = Figure(figsize=(30, 10))
             self.canvas = FigureCanvas(self.fig)
-            self.ax = self.fig.subplots(8, 1)
-            plt.subplots_adjust(hspace=0.5)
+            self.ax = self.fig.subplots(2, 4)  # Adjusted to 2 rows and 4 columns
+            plt.subplots_adjust(hspace=0.5, wspace=1)  # Adjust spacing as needed
             plt.ion()  # Turn on interactive mode for plotting
 
         # Ensure self.ax is always a list of axes
@@ -407,11 +413,12 @@ class InvestESG(ParallelEnv):
             self.ax = np.array([self.ax])
 
         # Clear previous figures to update with new data
-        for axis in self.ax:
-            axis.cla()
+        for row in self.ax:
+            for axis in row:
+                axis.cla()
 
         # Subplot 1: Overall ESG Investment and Climate Risk over time
-        ax1 = self.ax[0]
+        ax1 = self.ax[0][0]
         ax2 = ax1.twinx()  # Create a secondary y-axis
 
         ax1.plot(self.history["esg_investment"], label='Cumulative ESG Investment', color='blue')
@@ -432,33 +439,33 @@ class InvestESG(ParallelEnv):
 
         # Subplot 2: Company Decisions
         for i, decision_history in enumerate(self.history["company_decisions"]):
-            self.ax[1].plot(decision_history, label=f'Company {i}', linestyle='None', marker='o')
-        self.ax[1].set_title('Company Decisions Over Time')
-        self.ax[1].set_ylabel('Decision')
-        self.ax[1].set_xlabel('Timestep')
-        self.ax[1].set_yticks([0, 1, 2])
-        self.ax[1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
-        self.ax[1].legend()
+            self.ax[0][1].plot(decision_history, label=f'Company {i}', linestyle='None', marker='o')
+        self.ax[0][1].set_title('Company Decisions Over Time')
+        self.ax[0][1].set_ylabel('Decision')
+        self.ax[0][1].set_xlabel('Timestep')
+        self.ax[0][1].set_yticks([0, 1, 2])
+        self.ax[0][1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
+        self.ax[0][1].legend()
 
         # Subplot 3: Company Climate risk exposure over time
         for i, climate_risk_history in enumerate(self.history["company_climate_risk"]):
-            self.ax[2].plot(climate_risk_history, label=f'Company {i}')
-        self.ax[2].set_title('Company Climate Risk Over Time')
-        self.ax[2].set_ylabel('Climate Risk')
-        self.ax[2].set_xlabel('Timestep')
-        self.ax[2].legend()
+            self.ax[0][2].plot(climate_risk_history, label=f'Company {i}')
+        self.ax[0][2].set_title('Company Climate Risk Over Time')
+        self.ax[0][2].set_ylabel('Climate Risk')
+        self.ax[0][2].set_xlabel('Timestep')
+        self.ax[0][2].legend()
 
         # Subplot 4: Company Capitals over time
         for i, capital_history in enumerate(self.history["company_capitals"]):
-            self.ax[3].plot(capital_history, label=f'Company {i}')
-        self.ax[3].set_title('Company Capitals Over Time')
-        self.ax[3].set_ylabel('Capital')
-        self.ax[3].set_xlabel('Timestep')
-        self.ax[3].legend()
+            self.ax[0][3].plot(capital_history, label=f'Company {i}')
+        self.ax[0][3].set_title('Company Capitals Over Time')
+        self.ax[0][3].set_ylabel('Capital')
+        self.ax[0][3].set_xlabel('Timestep')
+        self.ax[0][3].legend()
 
         # Subplot 5: Investment Matrix
         investment_matrix = self.history["investment_matrix"]
-        ax = self.ax[4]
+        ax = self.ax[1][0]
         sns.heatmap(investment_matrix, ax=ax, cmap='Reds', cbar=True, annot=True, fmt='g')
 
         ax.set_title('Investment Matrix')
@@ -467,26 +474,26 @@ class InvestESG(ParallelEnv):
 
          # Subplot 6: Investor Capitals over time
         for i, capital_history in enumerate(self.history["investor_capitals"]):
-            self.ax[5].plot(capital_history, label=f'Investor {i}')
-        self.ax[5].set_title('Investor Capitals Over Time')
-        self.ax[5].set_ylabel('Capital')
-        self.ax[5].set_xlabel('Timestep')
-        self.ax[5].legend()
+            self.ax[1][1].plot(capital_history, label=f'Investor {i}')
+        self.ax[1][1].set_title('Investor Capitals Over Time')
+        self.ax[1][1].set_ylabel('Capital')
+        self.ax[1][1].set_xlabel('Timestep')
+        self.ax[1][1].legend()
 
         # Subplot 7: Investor Utility over time
         for i, utility_history in enumerate(self.history["investor_utility"]):
-            self.ax[6].plot(utility_history, label=f'Investor {i}')
-        self.ax[6].set_title('Investor Utility Over Time')
-        self.ax[6].set_ylabel('Utility')
-        self.ax[6].set_xlabel('Timestep')
-        self.ax[6].legend()
+            self.ax[1][2].plot(utility_history, label=f'Investor {i}')
+        self.ax[1][2].set_title('Investor Utility Over Time')
+        self.ax[1][2].set_ylabel('Utility')
+        self.ax[1][2].set_xlabel('Timestep')
+        self.ax[1][2].legend()
 
         # Subplot 8: Market Total Wealth over time
-        self.ax[7].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
-        self.ax[7].set_title('Market Total Wealth Over Time')
-        self.ax[7].set_ylabel('Total Wealth')
-        self.ax[7].set_xlabel('Timestep')
-        self.ax[7].legend()
+        self.ax[1][3].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
+        self.ax[1][3].set_title('Market Total Wealth Over Time')
+        self.ax[1][3].set_ylabel('Total Wealth')
+        self.ax[1][3].set_xlabel('Timestep')
+        self.ax[1][3].legend()
 
 
         # Update the plots
