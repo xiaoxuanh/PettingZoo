@@ -1,5 +1,5 @@
 from pettingzoo import ParallelEnv
-from gymnasium.spaces import Discrete, MultiDiscrete
+from gymnasium.spaces import Discrete, MultiDiscrete, Box
 import functools
 
 import numpy as np
@@ -26,7 +26,7 @@ class Company:
         self.margin = 0                     # single period profit margin
         self.capital_gain = 0               # single period capital gain
         self.strategy = None                # 1: "mitigation", 2: "greenwashing", 0: "none"
-        self.esg_score = None               # signal to be broadcasted to investors: "esg-friendly":1, "none":0
+        self.esg_score = 0               # signal to be broadcasted to investors: "esg-friendly":1, "none":0
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -97,7 +97,7 @@ class Company:
         self.margin = 0
         self.capital_gain = 0
         self.strategy = None
-        self.esg_score = None
+        self.esg_score = 0
     
 class Investor:
     def __init__(self, capital=10000, esg_preference=0.5):
@@ -192,8 +192,8 @@ class InvestESG(ParallelEnv):
             self.num_investors = num_investors
             self.investors = [Investor() for _ in range(num_investors)]
         
-        self.possible_agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
-
+        self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
+        self.possible_agents = self.agents[:]
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
@@ -223,7 +223,6 @@ class InvestESG(ParallelEnv):
     def action_space(self, agent):
         # each company has 3 possible actions: "mitigation", "greenwashing", "none"
         # each investor has num_companies possible*2 actions: for each company, invest/not invest
-
         # if agent is a company
         if agent.startswith("company"):
             return Discrete(3)
@@ -235,8 +234,9 @@ class InvestESG(ParallelEnv):
     def observation_space(self, agent):
         # all agents have access to the same information, namely the capital, climate risk exposure, ESG score, and margin of each company
         # of all companies and the investment in each company and remaining capital of each investor
-        observation = MultiDiscrete([4]*self.num_companies + [self.num_companies+1]*self.num_investors)
-        return observation
+        observation_size = self.num_companies * 4 + self.num_investors * (self.num_companies + 1)
+        observation_space = Box(low=-np.inf, high=np.inf, shape=(observation_size,))
+        return observation_space
 
     def step(self, actions):
         """Step function for the environment."""
@@ -301,7 +301,7 @@ class InvestESG(ParallelEnv):
 
         # 7. termination and truncation
         self.timestamp += 1
-        termination = {agent: self.timestamp >= self.max_steps for agent in self.possible_agents}
+        termination = {agent: self.timestamp >= self.max_steps for agent in self.agents}
         truncation = termination
 
         observations = self._get_observation()
@@ -312,7 +312,7 @@ class InvestESG(ParallelEnv):
         self._update_history()
         
         if any(termination.values()):
-            self.possible_agents = []
+            self.agents = []
         
         # 8. update observation for each company and investor
         return observations, rewards, termination, truncation, infos
@@ -323,7 +323,7 @@ class InvestESG(ParallelEnv):
             company.reset()
         for investor in self.investors:
             investor.reset()
-        self.possible_agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
+        self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
         self.market_performance = 1
         self.climate_event_probability = self.initial_climate_event_probability
         self.climate_event_occurred = False
@@ -349,12 +349,18 @@ class InvestESG(ParallelEnv):
     
     def _get_observation(self):
         """Get observation for each company and investor. Public information is shared across all agents."""
-        observations = {}
-        for i, company in enumerate(self.companies):
-            observations[f"company_{i}"] = np.array([company.capital, company.climate_risk_exposure, company.esg_score, company.margin])
-        for i, investor in enumerate(self.investors):
-            observations[f"investor_{i}"] = np.array(list(investor.investments.values()) + [investor.capital])
-        return observations
+        # Collect company observations
+        company_obs = []
+        for company in self.companies:
+            company_obs.extend([company.capital, company.climate_risk_exposure, company.esg_score, company.margin])
+        # Collect investor observations
+        investor_obs = []
+        for investor in self.investors:
+            investor_obs.extend(list(investor.investments.values()) + [investor.capital])
+        full_obs = np.array(company_obs + investor_obs)
+
+        # Return the same observation for all agents
+        return {agent: full_obs for agent in self.agents}
 
     def _get_reward(self):
         """Get reward for all agents."""
@@ -367,7 +373,7 @@ class InvestESG(ParallelEnv):
     
     def _get_infos(self):
         """Get infos for all agents. Dummy infos for compatibility with pettingzoo."""
-        infos = {agent: {} for agent in self.possible_agents}
+        infos = {agent: {} for agent in self.agents}
         return infos
 
     def _update_history(self):
