@@ -402,10 +402,10 @@ class InvestESG(ParallelEnv):
         
         if not hasattr(self, 'fig') or self.fig is None:
             # Initialize the plot only once
-            self.fig = Figure(figsize=(30, 10))
+            self.fig = Figure(figsize=(36, 10))
             self.canvas = FigureCanvas(self.fig)
             self.ax = self.fig.subplots(2, 4)  # Adjusted to 2 rows and 4 columns
-            plt.subplots_adjust(hspace=0.5, wspace=1)  # Adjust spacing as needed
+            plt.subplots_adjust(hspace=0.5, wspace=1.5)  # Adjust spacing as needed
             plt.ion()  # Turn on interactive mode for plotting
 
         # Ensure self.ax is always a list of axes
@@ -444,8 +444,8 @@ class InvestESG(ParallelEnv):
         self.ax[0][1].set_ylabel('Decision')
         self.ax[0][1].set_xlabel('Timestep')
         self.ax[0][1].set_yticks([0, 1, 2])
-        self.ax[0][1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
-        self.ax[0][1].legend()
+        self.ax[0][1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'], rotation=90)
+        self.ax[0][1].legend(loc='upper right')
 
         # Subplot 3: Company Climate risk exposure over time
         for i, climate_risk_history in enumerate(self.history["company_climate_risk"]):
@@ -453,7 +453,7 @@ class InvestESG(ParallelEnv):
         self.ax[0][2].set_title('Company Climate Risk Over Time')
         self.ax[0][2].set_ylabel('Climate Risk')
         self.ax[0][2].set_xlabel('Timestep')
-        self.ax[0][2].legend()
+        self.ax[0][2].legend(loc='upper right')
 
         # Subplot 4: Company Capitals over time
         for i, capital_history in enumerate(self.history["company_capitals"]):
@@ -461,7 +461,7 @@ class InvestESG(ParallelEnv):
         self.ax[0][3].set_title('Company Capitals Over Time')
         self.ax[0][3].set_ylabel('Capital')
         self.ax[0][3].set_xlabel('Timestep')
-        self.ax[0][3].legend()
+        self.ax[0][3].legend(loc='upper right')
 
         # Subplot 5: Investment Matrix
         investment_matrix = self.history["investment_matrix"]
@@ -478,7 +478,7 @@ class InvestESG(ParallelEnv):
         self.ax[1][1].set_title('Investor Capitals Over Time')
         self.ax[1][1].set_ylabel('Capital')
         self.ax[1][1].set_xlabel('Timestep')
-        self.ax[1][1].legend()
+        self.ax[1][1].legend(loc='upper right')
 
         # Subplot 7: Investor Utility over time
         for i, utility_history in enumerate(self.history["investor_utility"]):
@@ -486,14 +486,14 @@ class InvestESG(ParallelEnv):
         self.ax[1][2].set_title('Investor Utility Over Time')
         self.ax[1][2].set_ylabel('Utility')
         self.ax[1][2].set_xlabel('Timestep')
-        self.ax[1][2].legend()
+        self.ax[1][2].legend(loc='upper right')
 
         # Subplot 8: Market Total Wealth over time
         self.ax[1][3].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
         self.ax[1][3].set_title('Market Total Wealth Over Time')
         self.ax[1][3].set_ylabel('Total Wealth')
         self.ax[1][3].set_xlabel('Timestep')
-        self.ax[1][3].legend()
+        self.ax[1][3].legend(loc='upper right')
 
 
         # Update the plots
@@ -528,4 +528,5 @@ if __name__ == "__main__":
     env.reset()
     obs, rewards, terminations, truncations, infos = env.step(actions)
     env.render()
+    env.fig
 
