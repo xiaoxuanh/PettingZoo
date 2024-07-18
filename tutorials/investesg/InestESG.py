@@ -35,6 +35,7 @@ class CompanyAgent(BaseAgent):
 
     def get_action_and_value(self, x, action=None):
         """For each action, returns logit."""
+        x = x.float()
         hidden = self.network(x)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
@@ -43,21 +44,31 @@ class CompanyAgent(BaseAgent):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 class InvestorAgent(BaseAgent):
-    def __init__(self, observation_size, num_actions):
-        """For investor agent num_actions is the shape of the MultiDiscrete action space. 
-        More specifically, it is the number of companies to invest in. Each action is binary."""
+    def __init__(self, observation_size, num_companies):
+        """For investor agent num_actions is the size of the MultiDiscrete action space. 
+        More specifically, it is the number of companies to invest in * Each action being binary."""
+        num_actions = num_companies * 2
         super().__init__(observation_size, num_actions, hidden_sizes=[256, 256, 128])
+        self.num_companies = num_companies
 
     def get_action_and_value(self, x, action=None):
         """For each company, returns logit likelihodd of investing."""
+        x = x.float()
         hidden = self.network(x)
         logits = self.actor(hidden)  # Output logits directly
-        probs = [Categorical(logits=logits[:, i:i+1].squeeze(-1)) for i in range(logits.size(1))]
+        # Reshape logits to (batch_size, num_companies, 2) for binary decision
+        logits = logits.view(-1, self.num_companies, 2)
+
+        # Create a list of Categorical distributions for each company
+        # three dimensions: batch_size, num_companies, 2
+        probs = [Categorical(logits=logits[:, i, :]) for i in range(logits.size(1))]
         if action is None:
             action = torch.stack([p.sample() for p in probs], dim=1)
+        else:
+            action = action.view(-1, self.num_companies)
         # logprobs and entropy are summed over the companies, computing the probability of the combined action
-        logprobs = torch.stack([p.log_prob(a) for p, a in zip(probs, action.T)], dim=1).sum(dim=1)
-        entropy = torch.stack([p.entropy() for p in probs], dim=1).sum(dim=1)
+        logprobs = torch.stack([p.log_prob(a) for p, a in zip(probs, action.T)], dim=1)
+        entropy = torch.stack([p.entropy() for p in probs], dim=1)
         
         return action, logprobs, entropy, self.critic(hidden)
 
@@ -74,14 +85,21 @@ def batchify(x, device):
     # convert to list of np arrays
     x = np.stack([x[a] for a in x], axis=0)
     # convert to torch
-    x = torch.tensor(x, dtype=torch.float32).to(device)
+    x = torch.tensor(x).to(device)
     return x
 
 
 def unbatchify(x, env):
     """Converts np array to PZ style arguments."""
-    x = x.cpu().numpy()
-    x = {a: x[i] for i, a in enumerate(env.possible_agents)}
+    # Initialize a dictionary to hold the unbatched actions
+    unbatched_actions = {}
+
+    # Split the combined actions back into company and investor actions
+    for i, agent in enumerate(env.possible_agents):
+        if agent.startswith("company"):
+            unbatched_actions[agent] = x[agent]
+        elif agent.startswith("investor"):
+            unbatched_actions[agent] = np.array(x[agent])
 
     return x
 
@@ -113,11 +131,11 @@ if __name__ == "__main__":
     investor_observation_size = env.observation_space(investor_agents[0]).shape[0]
 
     company_actions = env.action_space(company_agents[0]).n # Assuming Discrete
-    investor_actions = len(env.action_space(investor_agents[0]).nvec)  # Assuming MultiDiscrete
+    investor_actions_num_companies = len(env.action_space(investor_agents[0]).nvec)  # Assuming MultiDiscrete
 
     """ LEARNER SETUP """
     company_agent = CompanyAgent(observation_size=company_observation_size, num_actions=company_actions).to(device)
-    investor_agent = InvestorAgent(observation_size=investor_observation_size, num_actions=investor_actions).to(device)
+    investor_agent = InvestorAgent(observation_size=investor_observation_size, num_companies=investor_actions_num_companies).to(device)
     optimizer = optim.Adam(list(company_agent.parameters()) + list(investor_agent.parameters()), lr=0.001, eps=1e-5)
 
     """ ALGO LOGIC: EPISODE STORAGE"""
@@ -133,8 +151,8 @@ if __name__ == "__main__":
     company_rb_values = torch.zeros((max_cycles, len(company_agents))).to(device)
     """ INVESTOR AGENT STORAGE """
     investor_rb_obs = torch.zeros((max_cycles, len(investor_agents), investor_observation_size)).to(device)
-    investor_rb_actions = torch.zeros((max_cycles, len(investor_agents), investor_actions)).to(device)
-    investor_rb_logprobs = torch.zeros((max_cycles, len(investor_agents), investor_actions)).to(device)
+    investor_rb_actions = torch.zeros((max_cycles, len(investor_agents), len(env.action_space(investor_agents[0]).nvec))).to(device)
+    investor_rb_logprobs = torch.zeros((max_cycles, len(investor_agents), len(env.action_space(investor_agents[0]).nvec))).to(device)
     investor_rb_rewards = torch.zeros((max_cycles, len(investor_agents))).to(device)
     investor_rb_terms = torch.zeros((max_cycles, len(investor_agents))).to(device)
     investor_rb_values = torch.zeros((max_cycles, len(investor_agents))).to(device)
@@ -180,8 +198,8 @@ if __name__ == "__main__":
                     investor_rb_obs[step, i] = torch.tensor(investor_obs[agent]).to(device)
                     investor_rb_rewards[step, i] = rewards[agent]
                     investor_rb_terms[step, i] = terms[agent]
-                    investor_rb_actions[step, i] = torch.tensor(investor_actions[i]).to(device)
-                    investor_rb_logprobs[step, i] = investor_logprobs[i]
+                    investor_rb_actions[step, i] = torch.tensor(investor_actions[i].cpu().numpy()).to(device)
+                    investor_rb_logprobs[step, i] = torch.tensor(investor_logprobs[i].cpu().numpy()).to(device)
                     investor_rb_values[step, i] = investor_values[i]
 
                 # compute episodic return
