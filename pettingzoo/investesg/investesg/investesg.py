@@ -192,7 +192,8 @@ class InvestESG(ParallelEnv):
             self.num_investors = num_investors
             self.investors = [Investor() for _ in range(num_investors)]
         
-        self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
+        self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
+        self.n_agents = len(self.agents)
         self.possible_agents = self.agents[:]
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
@@ -210,12 +211,12 @@ class InvestESG(ParallelEnv):
             "climate_event_occurs": [],
             "market_performance": [],
             "market_total_wealth": [],
-            "company_capitals": [[] for _ in range(num_companies)],
-            "company_climate_risk": [[] for _ in range(num_companies)],
-            "investor_capitals": [[] for _ in range(num_investors)],
-            "investor_utility": [[] for _ in range(num_investors)],
-            "investment_matrix": np.zeros((num_investors, num_companies)),
-            "company_decisions": [[] for _ in range(num_companies)]
+            "company_capitals": [[] for _ in range(self.num_companies)],
+            "company_climate_risk": [[] for _ in range(self.num_companies)],
+            "investor_capitals": [[] for _ in range(self.num_investors)],
+            "investor_utility": [[] for _ in range(self.num_investors)],
+            "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
+            "company_decisions": [[] for _ in range(self.num_companies)]
         }
 
 
