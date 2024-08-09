@@ -512,21 +512,21 @@ class InvestESG(ParallelEnv):
         
 
 if __name__ == "__main__":
-    env = InvestESG()
-    actions = {'company_0': 1, 'company_1': 0, 'company_2': 2, 'company_3': 2, 'company_4': 2, 'company_5': 2, 
-               'company_6': 0, 'company_7': 2, 'company_8': 1, 'company_9': 0, 
-               'investor_0': np.array([0, 1, 0, 1, 1, 1, 1, 1, 0, 1]), 
-               'investor_1': np.array([1, 1, 1, 1, 0, 1, 0, 0, 1, 0]), 
-               'investor_2': np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 1]), 
-               'investor_3': np.array([1, 1, 1, 1, 0, 0, 0, 1, 0, 1]), 
-               'investor_4': np.array([1, 1, 0, 0, 0, 1, 0, 0, 0, 0]), 
-               'investor_5': np.array([0, 0, 1, 1, 0, 1, 0, 1, 0, 0]), 
-               'investor_6': np.array([1, 1, 0, 0, 0, 0, 0, 0, 1, 1]), 
-               'investor_7': np.array([1, 1, 0, 0, 1, 0, 0, 1, 0, 1]), 
-               'investor_8': np.array([0, 0, 1, 0, 0, 0, 0, 1, 0, 1]), 
-               'investor_9': np.array([0, 1, 0, 0, 0, 1, 1, 0, 0, 0])}
+    env = InvestESG(company_attributes=[{'capital':10000,'climate_risk_exposure':0.5,'beta':0},
+                                    {'capital':10000,'climate_risk_exposure':0.5,'beta':0},
+                                    {'capital':10000,'climate_risk_exposure':0.5,'beta':0}],
+                investor_attributes=[{'capital':10000,'esg_preference':0.5},
+                                     {'capital':10000,'esg_preference':0.5},
+                                     {'capital':10000,'esg_preference':0.5}], 
+                                    num_investors=3, initial_climate_event_probability=0.1,
+                                    market_performance_baseline=1.05, market_performance_variance=0)
+    actions = {'company_0': 1, 'company_1': 0, 'company_2': 2, 
+               'investor_0': np.array([1,0,0]), 
+               'investor_1': np.array([0,1,0]), 
+               'investor_2': np.array([0,0,1])}
     env.reset()
     obs, rewards, terminations, truncations, infos = env.step(actions)
-    env.render()
-    env.fig
+    print(obs)
+    # env.render()
+    # env.fig
 
