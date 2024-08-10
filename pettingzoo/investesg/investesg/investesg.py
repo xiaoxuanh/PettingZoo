@@ -11,7 +11,7 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=10000, climate_risk_exposure = 0.5, beta = 0.1667):
+    def __init__(self, capital=10, climate_risk_exposure = 0.5, beta = 0.1667):
         self.initial_capital = capital      # initial capital
         self.capital = capital              # current capital
         self.beta = beta                    # Beta risk factor against market performance
@@ -40,7 +40,7 @@ class Company:
         """Make a decision on how to allocate capital."""
         self.strategy = strategy
         if strategy == 1:
-            self.invest_in_esg(self.capital*0.05)  
+            self.invest_in_esg(self.capital*0.025)  
             # TODO: this is a hardcoded value, should be a parameter;
             # also if hardcode is to be changed, should change in update_capital function as well
         elif strategy == 2:
@@ -70,12 +70,12 @@ class Company:
         company_performance = np.random.normal(loc=environment.market_performance, scale=self.beta) 
         # ranges from 0.5 to 1.5 of market performance baseline most of time
         new_capital = self.capital * company_performance
-        if environment.climate_event_occurred:
-            new_capital *= (1 - self.climate_risk_exposure)
+        if environment.climate_event_occurrence > 0:
+            new_capital *= (1 - self.climate_risk_exposure)**environment.climate_event_occurrence
 
         # backout the original capital based on esg investment
         if self.strategy == 1:
-            base_capital = self.capital / 0.95 
+            base_capital = self.capital / 0.975 
             # TODO: this is a hardcoded value, should be a parameter; 
             # also if hardcode is to be changed, should change in make_decision function as well
         elif self.strategy == 2:
@@ -100,7 +100,7 @@ class Company:
         self.esg_score = 0
     
 class Investor:
-    def __init__(self, capital=10000, esg_preference=0.5):
+    def __init__(self, capital=10, esg_preference=0.5):
         self.initial_capital = capital      # initial capital
         self.capital = capital              # current capital
         self.investments = {}               # dictionary to track investments in different companies
@@ -198,7 +198,7 @@ class InvestESG(ParallelEnv):
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
-        self.climate_event_occurred = False # whether a climate event has occurred in the current step
+        self.climate_event_occurrence = 0 # number of climate events occurred in the current step
         # initialize investors with initial investments dictionary
         for investor in self.investors:
             investor.initial_investment(self)
@@ -284,12 +284,12 @@ class InvestESG(ParallelEnv):
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
         total_esg_investment = np.sum(np.array([company.esg_invested for company in self.companies]))
-        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_esg_investment)
+        self.climate_event_probability =  self.initial_climate_event_probability + 0.014*self.timestamp/(1+0.028*total_esg_investment)
 
         # 4. market performance and climate event evolution
         self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
         # TODO: consider other distributions and time-correlation of market performance
-        self.climate_event_occurred = rng2.random() < self.climate_event_probability
+        self.climate_event_occurrence = int(self.climate_event_probability) + (rng2.random() < self.climate_event_probability % 1).astype(int)
 
         # 5. companies update capital based on market performance and climate event
         for company in self.companies:
@@ -326,7 +326,7 @@ class InvestESG(ParallelEnv):
         self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
         self.market_performance = 1
         self.climate_event_probability = self.initial_climate_event_probability
-        self.climate_event_occurred = False
+        self.climate_event_occurrence = 0
         self.timestamp = 0
         # reset historical data
         self.history = {
@@ -380,7 +380,7 @@ class InvestESG(ParallelEnv):
         """Update historical data."""
         self.history["esg_investment"].append(sum(company.esg_invested for company in self.companies))
         self.history["climate_risk"].append(self.climate_event_probability)
-        self.history["climate_event_occurs"].append(self.climate_event_occurred)
+        self.history["climate_event_occurs"].append(self.climate_event_occurrence)
         self.history["market_performance"].append(self.market_performance)
         self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.capital for investor in self.investors))
         for i, company in enumerate(self.companies):
@@ -425,14 +425,16 @@ class InvestESG(ParallelEnv):
         ax2.plot(self.history["climate_risk"], label='Climate Risk', color='orange')
         # Add vertical lines for climate events
         for i, event in enumerate(self.history["climate_event_occurs"]):
-            if event:
+            if event==1:
+                ax1.axvline(x=i, color='orange', linestyle='--', alpha=0.5)
+            if event>1:
                 ax1.axvline(x=i, color='red', linestyle='--', alpha=0.5)
 
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
         ax2.set_ylabel('Climate Event Probability')
-        ax2.set_ylim(0, 0.11)  # Set limits for Climate Event Probability
+        ax2.set_ylim(0, 2)  # Set limits for Climate Event Probability
 
         ax1.legend(loc='upper left')
         ax2.legend(loc='upper right')
