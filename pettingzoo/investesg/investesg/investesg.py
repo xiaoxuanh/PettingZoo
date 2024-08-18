@@ -13,27 +13,32 @@ import itertools
 
 class Company:
     def __init__(self, capital=10, climate_risk_exposure = 0.5, beta = 0.1667):
-        self.initial_capital = capital              # initial capital, in trillion USD
-        self.capital = capital                      # current capital, in trillion USD
-        self.beta = beta                            # Beta risk factor against market performance
+        self.initial_capital = capital                      # initial capital, in trillion USD
+        self.capital = capital                              # current capital, in trillion USD
+        self.beta = beta                                    # Beta risk factor against market performance
 
         self.initial_resilience \
-            = climate_risk_exposure                 # initial climate risk exposure
+            = climate_risk_exposure                         # initial climate risk exposure
         self.resilience \
-            = climate_risk_exposure                 # capital loss ratio when a climate event occurs
+            = climate_risk_exposure                         # capital loss ratio when a climate event occurs
         
-        self.resilience_incr_rate = 0.00001         # increase rate of climate resilience
-        self.cumu_emissions_mitigation_invested = 0 # cumulative amount invested in emissions mitigation, in trillion USD
-        self.cumu_resilience_invested = 0           # cumulative amount invested in resilience, in trillion USD
+        self.resilience_incr_rate = 0.00001                 # increase rate of climate resilience
+        self.cumu_mitigation_amount = 0    # cumulative amount invested in emissions mitigation, in trillion USD
+        self.cumu_greenwash_amount = 0      # cumulative amount invested in greenwashing, in trillion USD
+        self.cumu_resilience_amount = 0                   # cumulative amount invested in resilience, in trillion USD
 
-        self.margin = 0                             # single period profit margin
-        self.capital_gain = 0                       # single period capital gain
+        self.margin = 0                                     # single period profit margin
+        self.capital_gain = 0                               # single period capital gain
         
-        self.emissions_mitigation_investment = 0    # single period investment in emissions mitigation, in percentage of total capital
-        self.greenwash = None                       # whether the company is greenwashing
-        self.resilience_investment = 0              # single period investment in resilience, in percentage of total capital
-        self.esg_score = 0                          # signal to be broadcasted to investors: emissions mitigation investment / total capital,
-                                                    # adjusted for greenwashing
+        self.mitigation_pc = 0            # single period investment in emissions mitigation, in percentage of total capital
+        self.greenwash_pc = None                             # single period investment in greenwashing, in percentage of total capital
+        self.resilience_pc = 0                      # single period investment in resilience, in percentage of total capital
+        
+        self.mitigation_amount = 0        # amount of true emissions mitigation investment, in trillion USD
+        self.greenwash_amount = 0                # amount of greenwashing investment, in trillion USD
+        self.resilience_amount = 0               # amount of resilience investment, in trillion USD
+        self.esg_score = 0                                  # signal to be broadcasted to investors: emissions mitigation investment / total capital,
+                                                            # adjusted for greenwashing
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -46,35 +51,34 @@ class Company:
     def make_esg_decision(self):
         """Make a decision on how to allocate capital."""
         ### update capital and cumulative investment
-        # only update cumulative emissions mitigation investment if not greenwashing
-        self.cumu_true_emissions_mitigation_invested += self.emissions_mitigation_investment*(1-self.greenwash)*self.capital
-        # update cumulative resilience investment
-        self.cumu_resilience_invested += self.resilience_investment*self.capital
-        # update capital
-        self.capital -= self.emissions_mitigation_investment*self.capital + self.resilience_investment*self.capital
-
+        # update investment amount for single period
+        self.mitigation_amount = self.mitigation_pc*self.capital
+        self.greenwash_amount = self.greenwash_pc*self.capital
+        self.resilience_amount = self.resilience_pc*self.capital
+        # update cumulative investment
+        self.cumu_mitigation_amount += self.mitigation_amount
+        self.cumu_greenwash_amount += self.greenwash_amount
+        self.cumu_resilience_amount += self.resilience_amount
         ### update resilience
         self.resilience = self.initial_resilience \
-            * np.exp(-self.resilience_incr_rate * self.cumu_resilience_invested)
+            * np.exp(-self.resilience_incr_rate * self.cumu_resilience_amount)
 
         ### update esg score
-        self.esg_score = self.emissions_mitigation_investment*(1-self.greenwash) + self.emissions_mitigation_investment*2*self.greenwash
+        self.esg_score = self.mitigation_pc + self.greenwash_pc*2
+
 
     def update_capital(self, environment):
-        """Update the capital based on market performance and climate event."""
+        """Update the capital based on esg decision, market performance and climate event."""
         # add a random disturbance to market performance
         company_performance = np.random.normal(loc=environment.market_performance, scale=self.beta) 
         # ranges from 0.5 to 1.5 of market performance baseline most of time
-        new_capital = self.capital * company_performance
+        new_capital = self.capital * (1-self.mitigation_pc-self.resilience_pc-self.greenwash_pc) * company_performance
         if environment.climate_event_occurred:
             new_capital *= (1 - self.resilience)
 
-        # backout the original capital based on esg investment
-        base_capital = self.capital /(1 - self.emissions_mitigation_investment - self.resilience_investment)
-        
         # calculate margin and capital gain
-        self.capital_gain = new_capital - base_capital # ending capital - starting capital
-        self.margin = self.capital_gain/base_capital
+        self.capital_gain = new_capital - self.capital # ending capital - starting capital
+        self.margin = self.capital_gain/self.capital
         self.capital = new_capital
         
     
@@ -82,11 +86,15 @@ class Company:
         """Reset the company to the initial state."""
         self.capital = self.initial_capital
         self.resilience = self.initial_resilience
-        self.emissions_mitigation_investment = 0
-        self.greenwash = None
-        self.resilience_investment = 0
-        self.cumu_resilience_invested = 0
-        self.cumu_emissions_mitigation_invested = 0
+        self.mitigation_pc = 0
+        self.mitigation_amount = 0
+        self.greenwash_pc = 0
+        self.greenwash_amount = 0
+        self.resilience_pc = 0
+        self.resilience_amount = 0
+        self.cumu_resilience_amount = 0
+        self.cumu_mitigation_amount = 0
+        self.cumu_greenwash_amount = 0
         self.margin = 0
         self.capital_gain = 0
         self.esg_score = 0
@@ -215,29 +223,23 @@ class InvestESG(ParallelEnv):
             "investor_capitals": [[] for _ in range(self.num_investors)],
             "investor_utility": [[] for _ in range(self.num_investors)],
             "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
-            "company_decisions": [[] for _ in range(self.num_companies)]
+            "company_mitigation_amount": [[] for _ in range(self.num_companies)],
+            "company_greenwash_amount": [[] for _ in range(self.num_companies)],
+            "company_resilience_amount": [[] for _ in range(self.num_companies)]
         }
 
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        ## if allow_resilience_investment is True, each company makes decisions:
+        ## Each company makes 3 decisions:
         ## 1. Amount to invest in emissions mitigation (continuous)
-        ## 2. whether to greenwash (binary)
+        ## 2. amount to invest in greenwash (continuous)
         ## 3. amount to invest in resilience (continuous)
-        ### if allow_resilience_investment is False, the amount to invest in resilience is 0, and the company only makes decisions:
-        ## 1. Amount to invest in emissions mitigation (continuous)
-        ## 2. whether to greenwash (binary)
+        ## Each investor has num_companies possible*2 actions: for each company, invest/not invest
         
-        ## each investor has num_companies possible*2 actions: for each company, invest/not invest
         # if agent is a company
         if agent.startswith("company"):
-            space = {
-                "emissions_mitigation": Box(low=0, high=1, shape=(1,)),
-                "greenwash": Discrete(2), # 0: no greenwash, 1: greenwash
-                "resilience_investment": Box(low=0, high=1, shape=(1,)) # resilience investment can be turned off using the allow_resilience_investment flag
-            }
-            return Dict(space)
+            return Box(low=0, high=1, shape=(3,))
         else:  # investor
             return MultiDiscrete(self.num_companies * [2])
     
@@ -267,11 +269,7 @@ class InvestESG(ParallelEnv):
         # if company has negative capital, it cannot invest in ESG or greenwashing
         for i, company in enumerate(self.companies):
             if company.capital < 0:
-                companys_actions[f"company_{i}"] = {
-                    "emissions_mitigation": np.array([0.0]),
-                    "greenwash": 0,
-                    "resilience_investment": np.array([0.0])
-                }
+                companys_actions[f"company_{i}"] = np.array([0.0, 0.0, 0.0])
 
         # 0. investors divest from all companies and recollect capital
         for investor in self.investors:
@@ -294,19 +292,14 @@ class InvestESG(ParallelEnv):
                    
         # 2. companies invest in ESG/greenwashing/none, report margin and esg score
         for i, company in enumerate(self.companies):
-            company_action = companys_actions[f"company_{i}"]
-            company.emissions_mitigation_investment = company_action['emissions_mitigation'][0]
-            company.greenwash = bool(company_action['greenwash'])
-            if self.allow_resilience_investment:
-                company.resilience_investment = company_action['resilience_investment'][0]
-            else:
-                company.resilience_investment = 0
-            
+            company.mitigation_pc, company.greenwash_pc, company.resilience_pc = companys_actions[f"company_{i}"]
+            company.resilience_pc = company.resilience_pc if self.allow_resilience_investment else 0.0
+
             company.make_esg_decision()
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
-        total_emissions_mitigation_investment = np.sum(np.array([company.cumu_true_emissions_mitigation_invested for company in self.companies]))
-        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_emissions_mitigation_investment)
+        total_mitigation_investment = np.sum(np.array([company.cumu_mitigation_amount for company in self.companies]))
+        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_mitigation_investment)
 
         # 4. market performance and climate event evolution
         self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
@@ -362,7 +355,9 @@ class InvestESG(ParallelEnv):
             "investor_capitals": [[] for _ in range(self.num_investors)],
             "investor_utility": [[] for _ in range(self.num_investors)],
             "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
-            "company_decisions": [[] for _ in range(self.num_companies)]
+            "company_mitigation_amount": [[] for _ in range(self.num_companies)],
+            "company_greenwash_amount": [[] for _ in range(self.num_companies)],
+            "company_resilience_amount": [[] for _ in range(self.num_companies)],
         }
         self.fig = None
         self.ax = None
@@ -400,14 +395,16 @@ class InvestESG(ParallelEnv):
 
     def _update_history(self):
         """Update historical data."""
-        self.history["esg_investment"].append(sum(company.cumu_true_emissions_mitigation_invested for company in self.companies))
+        self.history["esg_investment"].append(sum(company.cumu_mitigation_amount for company in self.companies))
         self.history["climate_risk"].append(self.climate_event_probability)
         self.history["climate_event_occurs"].append(self.climate_event_occurred)
         self.history["market_performance"].append(self.market_performance)
         self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.capital for investor in self.investors))
         for i, company in enumerate(self.companies):
             self.history["company_capitals"][i].append(company.capital)
-            self.history["company_decisions"][i].append(company.strategy)
+            self.history["company_mitigation_amount"][i].append(company.mitigation_amount)
+            self.history["company_greenwash_amount"][i].append(company.greenwash_amount)
+            self.history["company_resilience_amount"][i].append(company.resilience_amount)
             self.history["company_climate_risk"][i].append(company.resilience)
         for i, investor in enumerate(self.investors):
             self.history["investor_capitals"][i].append(investor.capital+sum(investor.investments.values()))
@@ -425,12 +422,14 @@ class InvestESG(ParallelEnv):
         
         if not hasattr(self, 'fig') or self.fig is None:
             # Initialize the plot only once
-            self.fig = Figure(figsize=(30, 10))
+            self.fig = Figure(figsize=(36, 10))
             self.canvas = FigureCanvas(self.fig)
-            self.ax = self.fig.subplots(2, 5)  # Adjusted to 2 rows and 4 columns
+            self.ax = self.fig.subplots(2, 6)  # Adjusted to 2 rows and 6 columns
             plt.subplots_adjust(hspace=0.5, wspace=1)  # Adjust spacing as needed
             plt.ion()  # Turn on interactive mode for plotting
 
+            # Generate a color for each company
+            self.company_colors = plt.cm.rainbow(np.linspace(0, 1, self.num_companies))
         # Ensure self.ax is always a list of axes
         if not isinstance(self.ax, np.ndarray):
             self.ax = np.array([self.ax])
@@ -461,32 +460,54 @@ class InvestESG(ParallelEnv):
         ax2.legend(loc='upper right')
 
         # Subplot 2: Company Decisions
-        for i, decision_history in enumerate(self.history["company_decisions"]):
-            self.ax[0][1].plot(decision_history, label=f'Company {i}', linestyle='None', marker='o')
-        self.ax[0][1].set_title('Company Decisions Over Time')
-        self.ax[0][1].set_ylabel('Decision')
-        self.ax[0][1].set_xlabel('Timestep')
-        self.ax[0][1].set_yticks([0, 1, 2])
-        self.ax[0][1].set_yticklabels(['None', 'Mitigation', 'Greenwashing'])
-        self.ax[0][1].legend()
+        ax = self.ax[0][1]
+        for i in range(self.num_companies):
+            mitigation = self.history["company_mitigation_amount"][i]
+            ax.plot(mitigation, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Mitigation Investments Over Time')
+        ax.set_ylabel('Mitigation Investment')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
-        # Subplot 3: Company Climate risk exposure over time
+        # Subplot 3: Company Greenwash Decisions
+        ax = self.ax[0][2]
+        for i in range(self.num_companies):
+            greenwash = self.history["company_greenwash_amount"][i]
+            ax.plot(greenwash, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Greenwash Investments Over Time')
+        ax.set_ylabel('Greenwash Investment')
+        ax.set_xlabel('Timestep')
+        ax.legend()
+
+        # Subplot 4: Company Resilience Decisions
+        ax = self.ax[0][3]
+        for i in range(self.num_companies):
+            resilience = self.history["company_resilience_amount"][i]
+            ax.plot(resilience, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Resilience Investments Over Time')
+        ax.set_ylabel('Resilience Investment')
+        ax.set_xlabel('Timestep')
+        ax.legend()
+
+        # Subplot 5: Company Climate risk exposure over time
+        ax = self.ax[0][4]  
         for i, climate_risk_history in enumerate(self.history["company_climate_risk"]):
-            self.ax[0][2].plot(climate_risk_history, label=f'Company {i}')
-        self.ax[0][2].set_title('Company Climate Risk Over Time')
-        self.ax[0][2].set_ylabel('Climate Risk')
-        self.ax[0][2].set_xlabel('Timestep')
-        self.ax[0][2].legend()
+            ax.plot(climate_risk_history, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Climate Risk Over Time')
+        ax.set_ylabel('Climate Risk')
+        ax.set_xlabel('Timestep')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
-        # Subplot 4: Company Capitals over time
+        # Subplot 6: Company Capitals over time
+        ax = self.ax[0][5]
         for i, capital_history in enumerate(self.history["company_capitals"]):
-            self.ax[0][3].plot(capital_history, label=f'Company {i}')
-        self.ax[0][3].set_title('Company Capitals Over Time')
-        self.ax[0][3].set_ylabel('Capital')
-        self.ax[0][3].set_xlabel('Timestep')
-        self.ax[0][3].legend()
+            ax.plot(capital_history, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Capitals Over Time')
+        ax.set_ylabel('Capital')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
-        # Subplot 5: Investment Matrix
+        # Subplot 7: Investment Matrix
         investment_matrix = self.history["investment_matrix"]
         ax = self.ax[1][0]
         sns.heatmap(investment_matrix, ax=ax, cmap='Reds', cbar=True, annot=True, fmt='g')
@@ -495,37 +516,41 @@ class InvestESG(ParallelEnv):
         ax.set_ylabel('Investor ID')
         ax.set_xlabel('Company ID')
 
-         # Subplot 6: Investor Capitals over time
+         # Subplot 8: Investor Capitals over time
+        ax = self.ax[1][1]
         for i, capital_history in enumerate(self.history["investor_capitals"]):
-            self.ax[1][1].plot(capital_history, label=f'Investor {i}')
-        self.ax[1][1].set_title('Investor Capitals Over Time')
-        self.ax[1][1].set_ylabel('Capital')
-        self.ax[1][1].set_xlabel('Timestep')
-        self.ax[1][1].legend()
+            ax.plot(capital_history, label=f'Investor {i}')
+        ax.set_title('Investor Capitals Over Time')
+        ax.set_ylabel('Capital')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
-        # Subplot 7: Investor Utility over time
+        # Subplot 9: Investor Utility over time
+        ax = self.ax[1][2]
         for i, utility_history in enumerate(self.history["investor_utility"]):
-            self.ax[1][2].plot(utility_history, label=f'Investor {i}')
-        self.ax[1][2].set_title('Investor Utility Over Time')
-        self.ax[1][2].set_ylabel('Utility')
-        self.ax[1][2].set_xlabel('Timestep')
-        self.ax[1][2].legend()
+            ax.plot(utility_history, label=f'Investor {i}')
+        ax.set_title('Investor Utility Over Time')
+        ax.set_ylabel('Utility')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
-        # Subplot 7: Cumulative Investor Utility over time
+        # Subplot 10: Cumulative Investor Utility over time
+        ax = self.ax[1][3]
         for i, utility_history in enumerate(self.history["investor_utility"]):
             cumulative_utility_history = list(itertools.accumulate(utility_history))
-            self.ax[1][3].plot(cumulative_utility_history, label=f'Investor {i}')
-        self.ax[1][3].set_title('Cumulative Investor Utility Over Time')
-        self.ax[1][3].set_ylabel('Cumulative Utility')
-        self.ax[1][3].set_xlabel('Timestep')
-        self.ax[1][3].legend()
+            ax.plot(cumulative_utility_history, label=f'Investor {i}')
+        ax.set_title('Cumulative Investor Utility Over Time')
+        ax.set_ylabel('Cumulative Utility')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
-        # Subplot 8: Market Total Wealth over time
-        self.ax[1][4].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
-        self.ax[1][4].set_title('Market Total Wealth Over Time')
-        self.ax[1][4].set_ylabel('Total Wealth')
-        self.ax[1][4].set_xlabel('Timestep')
-        self.ax[1][4].legend()
+        # Subplot 11: Market Total Wealth over time
+        ax = self.ax[1][4]
+        ax.plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
+        ax.set_title('Market Total Wealth Over Time')
+        ax.set_ylabel('Total Wealth')
+        ax.set_xlabel('Timestep')
+        ax.legend()
 
 
         # Update the plots
