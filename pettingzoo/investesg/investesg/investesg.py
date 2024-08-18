@@ -100,7 +100,7 @@ class Company:
         self.esg_score = 0
     
 class Investor:
-    def __init__(self, capital=10000, esg_preference=0.5):
+    def __init__(self, capital=10, esg_preference=0.5):
         self.initial_capital = capital      # initial capital
         self.cash = capital              # current cash
         self.capital = capital            # current capital including cash and investment portfolio
@@ -206,7 +206,7 @@ class InvestESG(ParallelEnv):
         self.allow_resilience_investment = allow_resilience_investment # whether to allow resilience investment by companies
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
-        self.climate_event_occurred = False # whether a climate event has occurred in the current step
+        self.climate_event_occurrence = 0 # number of climate events occurred in the current step
         # initialize investors with initial investments dictionary
         for investor in self.investors:
             investor.initial_investment(self)
@@ -299,12 +299,12 @@ class InvestESG(ParallelEnv):
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
         total_mitigation_investment = np.sum(np.array([company.cumu_mitigation_amount for company in self.companies]))
-        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_mitigation_investment)
+        self.climate_event_probability =  self.initial_climate_event_probability + 0.014*self.timestamp/(1+0.028*total_mitigation_investment)
 
         # 4. market performance and climate event evolution
         self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
         # TODO: consider other distributions and time-correlation of market performance
-        self.climate_event_occurred = rng2.random() < self.climate_event_probability
+        self.climate_event_occurrence = int(self.climate_event_probability) + (rng2.random() < self.climate_event_probability % 1).astype(int)
 
         # 5. companies update capital based on market performance and climate event
         for company in self.companies:
@@ -341,7 +341,7 @@ class InvestESG(ParallelEnv):
         self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
         self.market_performance = 1
         self.climate_event_probability = self.initial_climate_event_probability
-        self.climate_event_occurred = False
+        self.climate_event_occurrence = 0
         self.timestamp = 0
         # reset historical data
         self.history = {
@@ -397,7 +397,7 @@ class InvestESG(ParallelEnv):
         """Update historical data."""
         self.history["esg_investment"].append(sum(company.cumu_mitigation_amount for company in self.companies))
         self.history["climate_risk"].append(self.climate_event_probability)
-        self.history["climate_event_occurs"].append(self.climate_event_occurred)
+        self.history["climate_event_occurs"].append(self.climate_event_occurrence)
         self.history["market_performance"].append(self.market_performance)
         self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.capital for investor in self.investors))
         for i, company in enumerate(self.companies):
@@ -447,14 +447,16 @@ class InvestESG(ParallelEnv):
         ax2.plot(self.history["climate_risk"], label='Climate Risk', color='orange')
         # Add vertical lines for climate events
         for i, event in enumerate(self.history["climate_event_occurs"]):
-            if event:
+            if event==1:
+                ax1.axvline(x=i, color='orange', linestyle='--', alpha=0.5)
+            if event>1:
                 ax1.axvline(x=i, color='red', linestyle='--', alpha=0.5)
 
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
         ax2.set_ylabel('Climate Event Probability')
-        ax2.set_ylim(0, 0.11)  # Set limits for Climate Event Probability
+        ax2.set_ylim(0, 2)  # Set limits for Climate Event Probability
 
         ax1.legend(loc='upper left')
         ax2.legend(loc='upper right')
@@ -496,7 +498,7 @@ class InvestESG(ParallelEnv):
         ax.set_title('Company Climate Risk Over Time')
         ax.set_ylabel('Climate Risk')
         ax.set_xlabel('Timestep')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left'loc='upper right')
 
         # Subplot 6: Company Capitals over time
         ax = self.ax[0][5]
@@ -505,7 +507,7 @@ class InvestESG(ParallelEnv):
         ax.set_title('Company Capitals Over Time')
         ax.set_ylabel('Capital')
         ax.set_xlabel('Timestep')
-        ax.legend()
+        ax.legend(loc='upper right')
 
         # Subplot 7: Investment Matrix
         investment_matrix = self.history["investment_matrix"]
@@ -523,7 +525,7 @@ class InvestESG(ParallelEnv):
         ax.set_title('Investor Capitals Over Time')
         ax.set_ylabel('Capital')
         ax.set_xlabel('Timestep')
-        ax.legend()
+        ax.legend(loc='upper right')
 
         # Subplot 9: Investor Utility over time
         ax = self.ax[1][2]
@@ -532,7 +534,7 @@ class InvestESG(ParallelEnv):
         ax.set_title('Investor Utility Over Time')
         ax.set_ylabel('Utility')
         ax.set_xlabel('Timestep')
-        ax.legend()
+        ax.legend(loc='upper right')
 
         # Subplot 10: Cumulative Investor Utility over time
         ax = self.ax[1][3]
@@ -542,7 +544,7 @@ class InvestESG(ParallelEnv):
         ax.set_title('Cumulative Investor Utility Over Time')
         ax.set_ylabel('Cumulative Utility')
         ax.set_xlabel('Timestep')
-        ax.legend()
+        ax.legend(loc='upper right')
 
         # Subplot 11: Market Total Wealth over time
         ax = self.ax[1][4]
