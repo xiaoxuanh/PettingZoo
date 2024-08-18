@@ -47,7 +47,7 @@ class Company:
         """Make a decision on how to allocate capital."""
         ### update capital and cumulative investment
         # only update cumulative emissions mitigation investment if not greenwashing
-        self.cumu_emissions_mitigation_invested += self.emissions_mitigation_investment*(1-self.greenwash)*self.capital
+        self.cumu_true_emissions_mitigation_invested += self.emissions_mitigation_investment*(1-self.greenwash)*self.capital
         # update cumulative resilience investment
         self.cumu_resilience_invested += self.resilience_investment*self.capital
         # update capital
@@ -305,8 +305,8 @@ class InvestESG(ParallelEnv):
             company.make_esg_decision()
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
-        total_esg_investment = np.sum(np.array([company.esg_invested for company in self.companies]))
-        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_esg_investment)
+        total_emissions_mitigation_investment = np.sum(np.array([company.cumu_true_emissions_mitigation_invested for company in self.companies]))
+        self.climate_event_probability =  self.initial_climate_event_probability * np.exp(-0.0001 * total_emissions_mitigation_investment)
 
         # 4. market performance and climate event evolution
         self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
@@ -374,7 +374,7 @@ class InvestESG(ParallelEnv):
         # Collect company observations
         company_obs = []
         for company in self.companies:
-            company_obs.extend([company.capital, company.climate_risk_exposure, company.esg_score, company.margin])
+            company_obs.extend([company.capital, company.resilience, company.esg_score, company.margin])
         # Collect investor observations
         investor_obs = []
         for investor in self.investors:
@@ -400,7 +400,7 @@ class InvestESG(ParallelEnv):
 
     def _update_history(self):
         """Update historical data."""
-        self.history["esg_investment"].append(sum(company.esg_invested for company in self.companies))
+        self.history["esg_investment"].append(sum(company.cumu_true_emissions_mitigation_invested for company in self.companies))
         self.history["climate_risk"].append(self.climate_event_probability)
         self.history["climate_event_occurs"].append(self.climate_event_occurred)
         self.history["market_performance"].append(self.market_performance)
@@ -408,7 +408,7 @@ class InvestESG(ParallelEnv):
         for i, company in enumerate(self.companies):
             self.history["company_capitals"][i].append(company.capital)
             self.history["company_decisions"][i].append(company.strategy)
-            self.history["company_climate_risk"][i].append(company.climate_risk_exposure)
+            self.history["company_climate_risk"][i].append(company.resilience)
         for i, investor in enumerate(self.investors):
             self.history["investor_capitals"][i].append(investor.capital+sum(investor.investments.values()))
             self.history["investor_utility"][i].append(investor.utility)
