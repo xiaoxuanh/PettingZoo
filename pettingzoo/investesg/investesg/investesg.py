@@ -2,6 +2,7 @@ from pettingzoo import ParallelEnv
 from gymnasium.spaces import Discrete, MultiDiscrete, Box
 import functools
 
+import wandb
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -11,10 +12,11 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=10, climate_risk_exposure = 0.5, beta = 0.1667):
+    def __init__(self, capital=10000, climate_risk_exposure = 0.5, beta = 0.1667, cont_esg_score=False):
         self.initial_capital = capital      # initial capital
         self.capital = capital              # current capital
         self.beta = beta                    # Beta risk factor against market performance
+        self.cont_esg_score = cont_esg_score # Continous ESG score
 
         self.initial_climate_risk_exposure \
             = climate_risk_exposure         # initial climate risk exposure
@@ -49,7 +51,13 @@ class Company:
             # also if hardcode is to be changed, should change in update_capital function as well
         else:
             self.esg_score = 0
-
+        
+        if self.cont_esg_score:
+            self.update_esg_score()
+    
+    def update_esg_score(self):
+        self.esg_score = self.esg_invested / self.capital
+  
     def invest_in_esg(self, amount):
         """Invest a certain amount in ESG."""
         self.esg_invested += amount
@@ -192,7 +200,8 @@ class InvestESG(ParallelEnv):
             self.num_investors = num_investors
             self.investors = [Investor() for _ in range(num_investors)]
         
-        self.agents = [f"company_{i}" for i in range(num_companies)] + [f"investor_{i}" for i in range(num_investors)]
+        self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
+        self.n_agents = len(self.agents)
         self.possible_agents = self.agents[:]
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
@@ -210,12 +219,12 @@ class InvestESG(ParallelEnv):
             "climate_event_occurs": [],
             "market_performance": [],
             "market_total_wealth": [],
-            "company_capitals": [[] for _ in range(num_companies)],
-            "company_climate_risk": [[] for _ in range(num_companies)],
-            "investor_capitals": [[] for _ in range(num_investors)],
-            "investor_utility": [[] for _ in range(num_investors)],
-            "investment_matrix": np.zeros((num_investors, num_companies)),
-            "company_decisions": [[] for _ in range(num_companies)]
+            "company_capitals": [[] for _ in range(self.num_companies)],
+            "company_climate_risk": [[] for _ in range(self.num_companies)],
+            "investor_capitals": [[] for _ in range(self.num_investors)],
+            "investor_utility": [[] for _ in range(self.num_investors)],
+            "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
+            "company_decisions": [[] for _ in range(self.num_companies)]
         }
 
 
@@ -398,14 +407,15 @@ class InvestESG(ParallelEnv):
         """Environment name."""
         return "InvestESG"
 
-    def render(self, mode='human'):
+    def render(self, mode='human', fig='fig'):
+        # import pdb; pdb.set_trace()
         
         if not hasattr(self, 'fig') or self.fig is None:
             # Initialize the plot only once
             self.fig = Figure(figsize=(36, 10))
             self.canvas = FigureCanvas(self.fig)
-            self.ax = self.fig.subplots(2, 4)  # Adjusted to 2 rows and 4 columns
-            plt.subplots_adjust(hspace=0.5, wspace=1.5)  # Adjust spacing as needed
+            self.ax = self.fig.subplots(2, 5)  # Adjusted to 2 rows and 4 columns
+            plt.subplots_adjust(hspace=0.5, wspace=1)  # Adjust spacing as needed
             plt.ion()  # Turn on interactive mode for plotting
 
         # Ensure self.ax is always a list of axes
@@ -490,12 +500,21 @@ class InvestESG(ParallelEnv):
         self.ax[1][2].set_xlabel('Timestep')
         self.ax[1][2].legend(loc='upper right')
 
-        # Subplot 8: Market Total Wealth over time
-        self.ax[1][3].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
-        self.ax[1][3].set_title('Market Total Wealth Over Time')
-        self.ax[1][3].set_ylabel('Total Wealth')
+        # Subplot 7: Cumulative Investor Utility over time
+        for i, utility_history in enumerate(self.history["investor_utility"]):
+            cumulative_utility_history = list(itertools.accumulate(utility_history))
+            self.ax[1][3].plot(cumulative_utility_history, label=f'Investor {i}')
+        self.ax[1][3].set_title('Cumulative Investor Utility Over Time')
+        self.ax[1][3].set_ylabel('Cumulative Utility')
         self.ax[1][3].set_xlabel('Timestep')
         self.ax[1][3].legend(loc='upper right')
+
+        # Subplot 8: Market Total Wealth over time
+        self.ax[1][4].plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
+        self.ax[1][4].set_title('Market Total Wealth Over Time')
+        self.ax[1][4].set_ylabel('Total Wealth')
+        self.ax[1][4].set_xlabel('Timestep')
+        self.ax[1][4].legend()
 
 
         # Update the plots
@@ -509,6 +528,20 @@ class InvestESG(ParallelEnv):
         elif mode == 'rgb_array':
             width, height = self.fig.get_size_inches() * self.fig.get_dpi()
             img = np.frombuffer(self.canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+            images = wandb.Image(img)
+            wandb.log({"figure": images})
+            d = {
+                "total climate_event_occurs": sum(self.history["climate_event_occurs"]),
+                "final climate risk": self.history["climate_risk"][-1],
+                "cumulative climate risk": sum(self.history["climate_risk"]),
+                "final esg_investment": self.history['esg_investment'][-1]
+            }
+            for i, company_climate_risk_history in enumerate(self.history['company_climate_risk']):
+                d[f"final company_{i} climate risk"] = company_climate_risk_history[-1]
+            
+            for i, investor_utility_history in enumerate(self.history['investor_utility']):
+                d[f"cumulative investor_{i} utility"] = sum(investor_utility_history)
+            wandb.log(d)
             return img
         
         
@@ -516,19 +549,24 @@ class InvestESG(ParallelEnv):
 if __name__ == "__main__":
     env = InvestESG(company_attributes=[{'capital':10000,'climate_risk_exposure':0.5,'beta':0},
                                     {'capital':10000,'climate_risk_exposure':0.5,'beta':0},
-                                    {'capital':10000,'climate_risk_exposure':0.5,'beta':0}],
-                investor_attributes=[{'capital':10000,'esg_preference':0.5},
-                                     {'capital':10000,'esg_preference':0.5},
-                                     {'capital':10000,'esg_preference':0.5}], 
+                                    {'capital':10000,'climate_risk_exposure':0.5,'beta':0}], 
                                     num_investors=3, initial_climate_event_probability=0.1,
                                     market_performance_baseline=1.05, market_performance_variance=0)
-    actions = {'company_0': 1, 'company_1': 0, 'company_2': 2, 
-               'investor_0': np.array([1,0,0]), 
-               'investor_1': np.array([0,1,0]), 
-               'investor_2': np.array([0,0,1])}
     env.reset()
+    company_actions = {f"company_{i}": env.action_space(f"company_{i}").sample() for i in range(env.num_companies)}
+    # company 0 never does anything
+    company_actions['company_0'] = 0
+    company_actions['company_1'] = 0
+    company_actions['company_2'] = 0
+    investor_actions = {f"investor_{i}": env.action_space(f"investor_{i}").sample() for i in range(env.num_investors)}
+    # mask such that investor 0 only invests in company 0
+    investor_actions['investor_0'] = [1, 0, 0]
+    investor_actions['investor_1'] = [0, 1, 0]
+    investor_actions['investor_2'] = [0, 0, 1]
+    actions = {**company_actions, **investor_actions}
     obs, rewards, terminations, truncations, infos = env.step(actions)
-    print(obs)
-    # env.render()
-    # env.fig
+    for _ in range(100):
+        obs, rewards, terminations, truncations, infos = env.step(actions)
+    img = env.render(mode='rgb_array')
+    import pdb; pdb.set_trace()
 
