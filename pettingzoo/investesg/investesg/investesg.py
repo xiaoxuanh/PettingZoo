@@ -1,5 +1,5 @@
 from pettingzoo import ParallelEnv
-from gymnasium.spaces import Discrete, MultiDiscrete, Box
+from gymnasium.spaces import Discrete, MultiDiscrete, Box, Dict, MultiBinary
 import functools
 
 import wandb
@@ -12,23 +12,28 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=10000, climate_risk_exposure = 0.5, beta = 0.1667, cont_esg_score=False):
-        self.initial_capital = capital      # initial capital
-        self.capital = capital              # current capital
-        self.beta = beta                    # Beta risk factor against market performance
-        self.cont_esg_score = cont_esg_score # Continous ESG score
+    def __init__(self, capital=10, climate_risk_exposure = 0.5, beta = 0.1667):
+        self.initial_capital = capital              # initial capital, in trillion USD
+        self.capital = capital                      # current capital, in trillion USD
+        self.beta = beta                            # Beta risk factor against market performance
 
-        self.initial_climate_risk_exposure \
-            = climate_risk_exposure         # initial climate risk exposure
-        self.climate_risk_exposure \
-            = climate_risk_exposure         # capital loss ratio when a climate event occurs
+        self.initial_resilience \
+            = climate_risk_exposure                 # initial climate risk exposure
+        self.resilience \
+            = climate_risk_exposure                 # capital loss ratio when a climate event occurs
         
-        self.exposure_decay_rate = 0.00001      # decay rate of climate risk exposure
-        self.esg_invested = 0               # cumulative amount invested in ESG
-        self.margin = 0                     # single period profit margin
-        self.capital_gain = 0               # single period capital gain
-        self.strategy = None                # 1: "mitigation", 2: "greenwashing", 0: "none"
-        self.esg_score = 0               # signal to be broadcasted to investors: "esg-friendly":1, "none":0
+        self.resilience_incr_rate = 0.00001         # increase rate of climate resilience
+        self.cumu_emissions_mitigation_invested = 0 # cumulative amount invested in emissions mitigation, in trillion USD
+        self.cumu_resilience_invested = 0           # cumulative amount invested in resilience, in trillion USD
+
+        self.margin = 0                             # single period profit margin
+        self.capital_gain = 0                       # single period capital gain
+        
+        self.emissions_mitigation_investment = 0    # single period investment in emissions mitigation, in percentage of total capital
+        self.greenwash = None                       # whether the company is greenwashing
+        self.resilience_investment = 0              # single period investment in resilience, in percentage of total capital
+        self.esg_score = 0                          # signal to be broadcasted to investors: emissions mitigation investment / total capital,
+                                                    # adjusted for greenwashing
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -38,39 +43,22 @@ class Company:
         """Lose investment due to climate event."""
         self.capital -= amount
     
-    def make_decision(self, strategy):
+    def make_esg_decision(self):
         """Make a decision on how to allocate capital."""
-        self.strategy = strategy
-        if strategy == 1:
-            self.invest_in_esg(self.capital*0.05)  
-            # TODO: this is a hardcoded value, should be a parameter;
-            # also if hardcode is to be changed, should change in update_capital function as well
-        elif strategy == 2:
-            self.invest_in_greenwash(self.capital*0.01)  
-            # TODO: this is a hardcoded value, should be a parameter
-            # also if hardcode is to be changed, should change in update_capital function as well
-        else:
-            self.esg_score = 0
-        
-        if self.cont_esg_score:
-            self.update_esg_score()
-    
-    def update_esg_score(self):
-        self.esg_score = self.esg_invested / self.capital
-  
-    def invest_in_esg(self, amount):
-        """Invest a certain amount in ESG."""
-        self.esg_invested += amount
-        self.capital -= amount
-        # climate risk exposure is an exponential decay function of the amount invested in ESG
-        self.climate_risk_exposure = self.initial_climate_risk_exposure \
-            * np.exp(-self.exposure_decay_rate * self.esg_invested)
-        self.esg_score = 1
+        ### update capital and cumulative investment
+        # only update cumulative emissions mitigation investment if not greenwashing
+        self.cumu_emissions_mitigation_invested += self.emissions_mitigation_investment*(1-self.greenwash)*self.capital
+        # update cumulative resilience investment
+        self.cumu_resilience_invested += self.resilience_investment*self.capital
+        # update capital
+        self.capital -= self.emissions_mitigation_investment*self.capital + self.resilience_investment*self.capital
 
-    def invest_in_greenwash(self, amount):
-        """Invest a certain amount in greenwashing."""
-        self.capital -= amount
-        self.esg_score = 1
+        ### update resilience
+        self.resilience = self.initial_resilience \
+            * np.exp(-self.resilience_incr_rate * self.cumu_resilience_invested)
+
+        ### update esg score
+        self.esg_score = self.emissions_mitigation_investment*(1-self.greenwash) + self.emissions_mitigation_investment*2*self.greenwash
 
     def update_capital(self, environment):
         """Update the capital based on market performance and climate event."""
@@ -79,17 +67,10 @@ class Company:
         # ranges from 0.5 to 1.5 of market performance baseline most of time
         new_capital = self.capital * company_performance
         if environment.climate_event_occurred:
-            new_capital *= (1 - self.climate_risk_exposure)
+            new_capital *= (1 - self.resilience)
 
         # backout the original capital based on esg investment
-        if self.strategy == 1:
-            base_capital = self.capital / 0.95 
-            # TODO: this is a hardcoded value, should be a parameter; 
-            # also if hardcode is to be changed, should change in make_decision function as well
-        elif self.strategy == 2:
-            base_capital = self.capital / 0.99
-        else:
-            base_capital = self.capital
+        base_capital = self.capital /(1 - self.emissions_mitigation_investment - self.resilience_investment)
         
         # calculate margin and capital gain
         self.capital_gain = new_capital - base_capital # ending capital - starting capital
@@ -100,17 +81,21 @@ class Company:
     def reset(self):
         """Reset the company to the initial state."""
         self.capital = self.initial_capital
-        self.climate_risk_exposure = self.initial_climate_risk_exposure
-        self.esg_invested = 0
+        self.resilience = self.initial_resilience
+        self.emissions_mitigation_investment = 0
+        self.greenwash = None
+        self.resilience_investment = 0
+        self.cumu_resilience_invested = 0
+        self.cumu_emissions_mitigation_invested = 0
         self.margin = 0
         self.capital_gain = 0
-        self.strategy = None
         self.esg_score = 0
     
 class Investor:
     def __init__(self, capital=10000, esg_preference=0.5):
         self.initial_capital = capital      # initial capital
-        self.capital = capital              # current capital
+        self.cash = capital              # current cash
+        self.capital = capital            # current capital including cash and investment portfolio
         self.investments = {}               # dictionary to track investments in different companies
         self.esg_preference = esg_preference # the weight of ESG in the investor's decision making
         self.utility = 0                     # single-period reward
@@ -122,16 +107,22 @@ class Investor:
     def invest(self, amount, company_idx):
         """Invest a certain amount in a company. 
         At the end of each period, investors collect all returns and then redistribute capital in next round."""
-        if self.capital+1e-6 < amount:
+        if self.cash < amount:
             raise ValueError("Investment amount exceeds available capital.")
         else:
-            self.capital -= amount
+            self.cash -= amount
             self.investments[company_idx] += amount
+    
+    def update_investment_returns(self, environment):
+        """Update the capital based on market performance and climate event."""
+        for company_idx, investment in self.investments.items():
+            company = environment.companies[company_idx]
+            self.investments[company_idx] = max(investment * (1 + company.margin), 0) # worst case is to lose all investment
 
     def divest(self, company_idx, environment):
         """Divest from a company."""
         investment_return = self.investments[company_idx]
-        self.capital += investment_return
+        self.cash += investment_return
         environment.companies[company_idx].lose_investment(investment_return)
         self.investments[company_idx] = 0
     
@@ -139,27 +130,25 @@ class Investor:
         """Calculate reward based on market performance and ESG preferences."""
         returns = 0
         esg_reward = 0
-        base_capital = sum(self.investments.values())
-        if base_capital == 0:
+        if self.capital == 0:
             self.utility = 0
         else:
             for company_idx, investment in self.investments.items():
                 if investment == 0:
                     continue
                 company = environment.companies[company_idx]
-                returns += investment * company.margin
+                returns += investment # investment already includes returns
                 esg_reward += company.esg_score
-                # update value of investment based on returns; the worst case is to lose all investment
-                self.investments[company_idx] = max(investment * (1 + company.margin), 0)
 
-            overall_return_rate = returns/base_capital
+            overall_return_rate = returns/self.capital
             utility = overall_return_rate + self.esg_preference * esg_reward
             self.utility = utility
+            self.capital = self.cash + returns
 
-    
     def reset(self):
         """Reset the investor to the initial state."""
         self.capital = self.initial_capital
+        self.cash = self.initial_capital
         self.investments = {i: 0 for i in self.investments}
         self.utility = 0
 
@@ -180,7 +169,8 @@ class InvestESG(ParallelEnv):
         initial_climate_event_probability=0.1,
         max_steps=100,
         market_performance_baseline=1.1, 
-        market_performance_variance=0.0
+        market_performance_variance=0.0,
+        allow_resilience_investment=False
     ):
         self.max_steps = max_steps
         self.timestamp = 0
@@ -205,6 +195,7 @@ class InvestESG(ParallelEnv):
         self.possible_agents = self.agents[:]
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
+        self.allow_resilience_investment = allow_resilience_investment # whether to allow resilience investment by companies
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurred = False # whether a climate event has occurred in the current step
@@ -230,19 +221,30 @@ class InvestESG(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        # each company has 3 possible actions: "mitigation", "greenwashing", "none"
-        # each investor has num_companies possible*2 actions: for each company, invest/not invest
+        ## if allow_resilience_investment is True, each company makes decisions:
+        ## 1. Amount to invest in emissions mitigation (continuous)
+        ## 2. whether to greenwash (binary)
+        ## 3. amount to invest in resilience (continuous)
+        ### if allow_resilience_investment is False, the amount to invest in resilience is 0, and the company only makes decisions:
+        ## 1. Amount to invest in emissions mitigation (continuous)
+        ## 2. whether to greenwash (binary)
+        
+        ## each investor has num_companies possible*2 actions: for each company, invest/not invest
         # if agent is a company
         if agent.startswith("company"):
-            return Discrete(3)
-        # if agent is an investor
-        else:
-            return MultiDiscrete(self.num_companies*[2])
+            space = {
+                "emissions_mitigation": Box(low=0, high=1, shape=(1,)),
+                "greenwash": Discrete(2), # 0: no greenwash, 1: greenwash
+                "resilience_investment": Box(low=0, high=1, shape=(1,)) # resilience investment can be turned off using the allow_resilience_investment flag
+            }
+            return Dict(space)
+        else:  # investor
+            return MultiDiscrete(self.num_companies * [2])
     
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
-        # all agents have access to the same information, namely the capital, climate risk exposure, ESG score, and margin of each company
-        # of all companies and the investment in each company and remaining capital of each investor
+        # all agents have access to the same information, namely the capital, climate resilience, ESG score, and margin of each company
+        # of all companies and the investment in each company and remaining cash of each investor
         observation_size = self.num_companies * 4 + self.num_investors * (self.num_companies + 1)
         observation_space = Box(low=-np.inf, high=np.inf, shape=(observation_size,))
         return observation_space
@@ -256,7 +258,7 @@ class InvestESG(ParallelEnv):
 
         ## unpack actions
         # first num_companies actions are for companies, the rest are for investors
-        companys_actions = dict(itertools.islice(actions.items(), self.num_companies))
+        companys_actions = {k: v for k, v in actions.items() if k.startswith("company_")}
         remaining_actions = {k: v for k, v in actions.items() if k not in companys_actions}
         # Reindex investor actions to start from 0
         investors_actions = {f"investor_{i}": action for i, (k, action) in enumerate(remaining_actions.items())}
@@ -265,7 +267,11 @@ class InvestESG(ParallelEnv):
         # if company has negative capital, it cannot invest in ESG or greenwashing
         for i, company in enumerate(self.companies):
             if company.capital < 0:
-                companys_actions[f"company_{i}"] = 0
+                companys_actions[f"company_{i}"] = {
+                    "emissions_mitigation": np.array([0.0]),
+                    "greenwash": 0,
+                    "resilience_investment": np.array([0.0])
+                }
 
         # 0. investors divest from all companies and recollect capital
         for investor in self.investors:
@@ -289,7 +295,14 @@ class InvestESG(ParallelEnv):
         # 2. companies invest in ESG/greenwashing/none, report margin and esg score
         for i, company in enumerate(self.companies):
             company_action = companys_actions[f"company_{i}"]
-            company.make_decision(company_action)
+            company.emissions_mitigation_investment = company_action['emissions_mitigation'][0]
+            company.greenwash = bool(company_action['greenwash'])
+            if self.allow_resilience_investment:
+                company.resilience_investment = company_action['resilience_investment'][0]
+            else:
+                company.resilience_investment = 0
+            
+            company.make_esg_decision()
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
         total_esg_investment = np.sum(np.array([company.esg_invested for company in self.companies]))
