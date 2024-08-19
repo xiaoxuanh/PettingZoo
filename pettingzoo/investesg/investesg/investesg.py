@@ -308,10 +308,11 @@ class InvestESG(ParallelEnv):
         # TODO: consider other distributions and time-correlation of market performance
         self.climate_event_occurrence = int(self.climate_event_probability) + (rng2.random() < self.climate_event_probability % 1).astype(int)
 
-        # 5. companies update capital based on market performance and climate event
+        # 5. companies and investors update capital based on market performance and climate event
         for company in self.companies:
             company.update_capital(self)
-
+        for investor in self.investors:
+            investor.update_investment_returns(self)
         # 6. investors calculate returns based on market performance
         for investor in self.investors:
             investor.calculate_utility(self)
@@ -413,7 +414,7 @@ class InvestESG(ParallelEnv):
             self.history["company_esg_score"][i].append(company.esg_score)
             self.history["company_margin"][i].append(company.margin)
         for i, investor in enumerate(self.investors):
-            self.history["investor_capitals"][i].append(investor.capital+sum(investor.investments.values()))
+            self.history["investor_capitals"][i].append(investor.capital)
             self.history["investor_utility"][i].append(investor.utility)
             for j, investment in investor.investments.items():
                 self.history["investment_matrix"][i, j] += investment
@@ -502,8 +503,8 @@ class InvestESG(ParallelEnv):
         ax = self.ax[1][0]  
         for i, climate_risk_history in enumerate(self.history["company_climate_risk"]):
             ax.plot(climate_risk_history, label=f'Company {i}', color=self.company_colors[i])
-        ax.set_title('Company Climate Risk Over Time')
-        ax.set_ylabel('Climate Risk')
+        ax.set_title('Company Climate Risk Exposure Over Time')
+        ax.set_ylabel('Climate Risk Exposure')
         ax.set_xlabel('Timestep')
         ax.legend(loc='upper right')
 
