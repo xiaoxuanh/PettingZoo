@@ -285,7 +285,8 @@ class InvestESG(ParallelEnv):
             num_investments = np.sum(investor_action)
             if num_investments > 0:
                 # equal investment in each company; round down to nearest integer to avoid exceeding capital
-                investment_amount = np.floor(investor.capital/num_investments) 
+                # print(f"investor {i} has {investor.cash} cash, and {investor.capital} capital")
+                investment_amount = np.floor(investor.cash/num_investments) 
                 for j, company in enumerate(self.companies):
                     if investor_action[j]:
                         investor.invest(investment_amount, j)
