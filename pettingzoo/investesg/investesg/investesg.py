@@ -148,8 +148,8 @@ class Investor:
                 returns += investment # investment already includes returns
                 esg_reward += company.esg_score
 
-            overall_return_rate = returns/self.capital
-            utility = overall_return_rate + self.esg_preference * esg_reward
+            period_profit = returns + self.cash - self.capital
+            utility = period_profit + self.esg_preference * esg_reward * 100 # scale up esg reward to percentage point so it is comparable to period profit
             self.utility = utility
             self.capital = self.cash + returns
 
