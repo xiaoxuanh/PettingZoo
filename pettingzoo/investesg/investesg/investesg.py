@@ -22,7 +22,7 @@ class Company:
         self.resilience \
             = climate_risk_exposure                         # capital loss ratio when a climate event occurs
         
-        self.resilience_incr_rate = 0.1                 # increase rate of climate resilience
+        self.resilience_incr_rate = 3                 # increase rate of climate resilience
         self.cumu_mitigation_amount = 0    # cumulative amount invested in emissions mitigation, in trillion USD
         self.cumu_greenwash_amount = 0      # cumulative amount invested in greenwashing, in trillion USD
         self.cumu_resilience_amount = 0                   # cumulative amount invested in resilience, in trillion USD
@@ -61,7 +61,7 @@ class Company:
         self.cumu_resilience_amount += self.resilience_amount
         ### update resilience
         self.resilience = self.initial_resilience \
-            * np.exp(-self.resilience_incr_rate * self.cumu_resilience_amount)
+            * np.exp(-self.resilience_incr_rate * (self.cumu_resilience_amount/self.capital))
 
         ### update esg score
         self.esg_score = self.mitigation_pc + self.greenwash_pc*2
@@ -405,7 +405,8 @@ class InvestESG(ParallelEnv):
         self.history["climate_risk"].append(self.climate_event_probability)
         self.history["climate_event_occurs"].append(self.climate_event_occurrence)
         self.history["market_performance"].append(self.market_performance)
-        self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.capital for investor in self.investors))
+        # at the end of the step investors haven't collected returns yet, so company capitals include returns for investors
+        self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.cash for investor in self.investors))
         for i, company in enumerate(self.companies):
             self.history["company_capitals"][i].append(company.capital)
             self.history["company_mitigation_amount"][i].append(company.mitigation_amount)
