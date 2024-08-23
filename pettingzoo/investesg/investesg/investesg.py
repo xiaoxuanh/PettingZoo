@@ -12,7 +12,7 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=10, climate_risk_exposure = 0.5, beta = 0.1667):
+    def __init__(self, capital=6, climate_risk_exposure = 0.07, beta = 0.1667):
         self.initial_capital = capital                      # initial capital, in trillion USD
         self.capital = capital                              # current capital, in trillion USD
         self.beta = beta                                    # Beta risk factor against market performance
@@ -102,8 +102,9 @@ class Company:
         self.capital_gain = 0
         self.esg_score = 0
         self.bankrupt = False
+
 class Investor:
-    def __init__(self, capital=10, esg_preference=0.5):
+    def __init__(self, capital=6, esg_preference=0):
         self.initial_capital = capital      # initial capital
         self.cash = capital              # current cash
         self.capital = capital            # current capital including cash and investment portfolio
@@ -175,9 +176,9 @@ class InvestESG(ParallelEnv):
         self,
         company_attributes=None,
         investor_attributes=None,
-        num_companies=10,
-        num_investors=10,
-        initial_climate_event_probability=0.1,
+        num_companies=5,
+        num_investors=5,
+        initial_climate_event_probability=0.5,
         max_steps=100,
         market_performance_baseline=1.1, 
         market_performance_variance=0.0,
