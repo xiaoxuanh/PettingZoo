@@ -39,6 +39,7 @@ class Company:
         self.resilience_amount = 0               # amount of resilience investment, in trillion USD
         self.esg_score = 0                                  # signal to be broadcasted to investors: emissions mitigation investment / total capital,
                                                             # adjusted for greenwashing
+        self.bankrupt = False
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -80,6 +81,8 @@ class Company:
         self.capital_gain = new_capital - self.capital # ending capital - starting capital
         self.margin = self.capital_gain/self.capital
         self.capital = new_capital
+        if self.capital <= 0:
+            self.bankrupt = True
         
     
     def reset(self):
@@ -98,7 +101,7 @@ class Company:
         self.margin = 0
         self.capital_gain = 0
         self.esg_score = 0
-    
+        self.bankrupt = False
 class Investor:
     def __init__(self, capital=10, esg_preference=0.5):
         self.initial_capital = capital      # initial capital
@@ -268,9 +271,9 @@ class InvestESG(ParallelEnv):
         investors_actions = {f"investor_{i}": action for i, (k, action) in enumerate(remaining_actions.items())}
 
         ## action masks
-        # if company has negative capital, it cannot invest in ESG or greenwashing
+        # if company is brankrupt, it cannot invest in ESG or greenwashing
         for i, company in enumerate(self.companies):
-            if company.capital < 0:
+            if company.bankrupt:
                 companys_actions[f"company_{i}"] = np.array([0.0, 0.0, 0.0])
 
         # 0. investors divest from all companies and recollect capital
@@ -295,6 +298,8 @@ class InvestESG(ParallelEnv):
                    
         # 2. companies invest in ESG/greenwashing/none, report margin and esg score
         for i, company in enumerate(self.companies):
+            if company.bankrupt:
+                continue # skip if company is bankrupt
             company.mitigation_pc, company.greenwash_pc, company.resilience_pc = companys_actions[f"company_{i}"]
             company.resilience_pc = company.resilience_pc if self.allow_resilience_investment else 0.0
 
@@ -311,6 +316,8 @@ class InvestESG(ParallelEnv):
 
         # 5. companies and investors update capital based on market performance and climate event
         for company in self.companies:
+            if company.bankrupt:
+                continue # skip if company is bankrupt
             company.update_capital(self)
         for investor in self.investors:
             investor.update_investment_returns(self)
