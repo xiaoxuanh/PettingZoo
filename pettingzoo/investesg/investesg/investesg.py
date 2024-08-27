@@ -63,7 +63,6 @@ class Company:
         ### update resilience
         self.resilience = self.initial_resilience \
             * np.exp(-self.resilience_incr_rate * (self.cumu_resilience_amount/self.capital))
-
         ### update esg score
         self.esg_score = self.mitigation_pc + self.greenwash_pc*2
 
@@ -83,7 +82,6 @@ class Company:
         self.capital = new_capital
         if self.capital <= 0:
             self.bankrupt = True
-        
     
     def reset(self):
         """Reset the company to the initial state."""
@@ -182,7 +180,10 @@ class InvestESG(ParallelEnv):
         max_steps=100,
         market_performance_baseline=1.1, 
         market_performance_variance=0.0,
-        allow_resilience_investment=False
+        allow_resilience_investment=False,
+        allow_greenwash_investment=False,
+        action_capping=0.1,
+        **kwargs
     ):
         self.max_steps = max_steps
         self.timestamp = 0
@@ -211,6 +212,7 @@ class InvestESG(ParallelEnv):
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
+        self.action_capping = action_capping # action capping for company action
         # initialize investors with initial investments dictionary
         for investor in self.investors:
             investor.initial_investment(self)
@@ -222,6 +224,8 @@ class InvestESG(ParallelEnv):
             "climate_event_occurs": [],
             "market_performance": [],
             "market_total_wealth": [],
+            "company_rewards": [[] for _ in range(self.num_companies)],
+            "investor_rewards": [[] for _ in range(self.num_investors)],
             "company_capitals": [[] for _ in range(self.num_companies)],
             "company_climate_risk": [[] for _ in range(self.num_companies)],
             "investor_capitals": [[] for _ in range(self.num_investors)],
@@ -245,7 +249,7 @@ class InvestESG(ParallelEnv):
         
         # if agent is a company
         if agent.startswith("company"):
-            return Box(low=0, high=1, shape=(3,))
+            return Box(low=0, high=self.action_capping, shape=(3,))
         else:  # investor
             return MultiDiscrete(self.num_companies * [2])
     
@@ -302,6 +306,7 @@ class InvestESG(ParallelEnv):
             if company.bankrupt:
                 continue # skip if company is bankrupt
             company.mitigation_pc, company.greenwash_pc, company.resilience_pc = companys_actions[f"company_{i}"]
+            company.greenwash_pc = company.greenwash_pc if self.allow_greenwash_investment else 0.0
             company.resilience_pc = company.resilience_pc if self.allow_resilience_investment else 0.0
 
             company.make_esg_decision()
@@ -371,7 +376,9 @@ class InvestESG(ParallelEnv):
             "company_greenwash_amount": [[] for _ in range(self.num_companies)],
             "company_resilience_amount": [[] for _ in range(self.num_companies)],
             "company_esg_score": [[] for _ in range(self.num_companies)],
-            "company_margin": [[] for _ in range(self.num_companies)]
+            "company_margin": [[] for _ in range(self.num_companies)],
+            "company_rewards": [[] for _ in range(self.num_companies)],
+            "investor_rewards": [[] for _ in range(self.num_investors)],
         }
         self.fig = None
         self.ax = None
@@ -415,6 +422,7 @@ class InvestESG(ParallelEnv):
         self.history["market_performance"].append(self.market_performance)
         # at the end of the step investors haven't collected returns yet, so company capitals include returns for investors
         self.history["market_total_wealth"].append(sum(company.capital for company in self.companies)+sum(investor.cash for investor in self.investors))
+        reward = self._get_reward()
         for i, company in enumerate(self.companies):
             self.history["company_capitals"][i].append(company.capital)
             self.history["company_mitigation_amount"][i].append(company.mitigation_amount)
@@ -423,9 +431,11 @@ class InvestESG(ParallelEnv):
             self.history["company_climate_risk"][i].append(company.resilience)
             self.history["company_esg_score"][i].append(company.esg_score)
             self.history["company_margin"][i].append(company.margin)
+            self.history["company_rewards"][i].append(reward[f"company_{i}"])
         for i, investor in enumerate(self.investors):
             self.history["investor_capitals"][i].append(investor.capital)
             self.history["investor_utility"][i].append(investor.utility)
+            self.history["investor_rewards"][i].append(reward[f"investor_{i}"])
             for j, investment in investor.investments.items():
                 self.history["investment_matrix"][i, j] += investment
 
@@ -594,20 +604,6 @@ class InvestESG(ParallelEnv):
         elif mode == 'rgb_array':
             width, height = self.fig.get_size_inches() * self.fig.get_dpi()
             img = np.frombuffer(self.canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
-            images = wandb.Image(img)
-            wandb.log({"figure": images})
-            d = {
-                "total climate_event_occurs": sum(self.history["climate_event_occurs"]),
-                "final climate risk": self.history["climate_risk"][-1],
-                "cumulative climate risk": sum(self.history["climate_risk"]),
-                "final esg_investment": self.history['esg_investment'][-1]
-            }
-            for i, company_climate_risk_history in enumerate(self.history['company_climate_risk']):
-                d[f"final company_{i} climate risk"] = company_climate_risk_history[-1]
-            
-            for i, investor_utility_history in enumerate(self.history['investor_utility']):
-                d[f"cumulative investor_{i} utility"] = sum(investor_utility_history)
-            wandb.log(d)
             return img
         
         
