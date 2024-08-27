@@ -209,6 +209,7 @@ class InvestESG(ParallelEnv):
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.allow_resilience_investment = allow_resilience_investment # whether to allow resilience investment by companies
+        self.allow_green_investment = allow_greenwash_investment # whether to allow greenwash investment by companies
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
