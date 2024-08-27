@@ -1,5 +1,5 @@
 from pettingzoo import ParallelEnv
-from gymnasium.spaces import Discrete, MultiDiscrete, Box, Dict, MultiBinary
+from gym.spaces import Discrete, MultiDiscrete, Box, Dict, MultiBinary
 import functools
 
 import wandb
@@ -209,7 +209,7 @@ class InvestESG(ParallelEnv):
         self.market_performance_baseline = market_performance_baseline # initial market performance
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.allow_resilience_investment = allow_resilience_investment # whether to allow resilience investment by companies
-        self.allow_green_investment = allow_greenwash_investment # whether to allow greenwash investment by companies
+        self.allow_greenwash_investment = allow_greenwash_investment # whether to allow greenwash investment by companies
         self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
@@ -221,6 +221,8 @@ class InvestESG(ParallelEnv):
         # initialize historical data storage
         self.history = {
             "esg_investment": [],
+            "greenwash_investment": [],
+            "resilience_investment": [],
             "climate_risk": [],
             "climate_event_occurs": [],
             "market_performance": [],
@@ -236,7 +238,9 @@ class InvestESG(ParallelEnv):
             "company_greenwash_amount": [[] for _ in range(self.num_companies)],
             "company_resilience_amount": [[] for _ in range(self.num_companies)],
             "company_esg_score": [[] for _ in range(self.num_companies)],
-            "company_margin": [[] for _ in range(self.num_companies)]
+            "company_margin": [[] for _ in range(self.num_companies)],
+            "company_rewards": [[] for _ in range(self.num_companies)],
+            "investor_rewards": [[] for _ in range(self.num_investors)],
         }
 
 
@@ -364,6 +368,9 @@ class InvestESG(ParallelEnv):
         # reset historical data
         self.history = {
             "esg_investment": [],
+            "esg_investment": [],
+            "greenwash_investment": [],
+            "resilience_investment": [],
             "climate_risk": [],
             "climate_event_occurs": [],
             "market_performance": [],
@@ -418,6 +425,8 @@ class InvestESG(ParallelEnv):
     def _update_history(self):
         """Update historical data."""
         self.history["esg_investment"].append(sum(company.cumu_mitigation_amount for company in self.companies))
+        self.history["greenwash_investment"].append(sum(company.cumu_greenwash_amount for company in self.companies))
+        self.history["resilience_investment"].append(sum(company.cumu_resilience_amount for company in self.companies))
         self.history["climate_risk"].append(self.climate_event_probability)
         self.history["climate_event_occurs"].append(self.climate_event_occurrence)
         self.history["market_performance"].append(self.market_performance)
