@@ -262,7 +262,7 @@ class InvestESG(ParallelEnv):
     def observation_space(self, agent):
         # all agents have access to the same information, namely the capital, climate resilience, ESG score, and margin of each company
         # of all companies and the investment in each company and remaining cash of each investor
-        observation_size = self.num_companies * 4 + self.num_investors * (self.num_companies + 1)
+        observation_size = self.num_companies * 7 + self.num_investors * (self.num_companies + 1) + 3
         observation_space = Box(low=-np.inf, high=np.inf, shape=(observation_size,))
         return observation_space
 
@@ -398,12 +398,13 @@ class InvestESG(ParallelEnv):
         # Collect company observations
         company_obs = []
         for company in self.companies:
-            company_obs.extend([company.capital, company.resilience, company.esg_score, company.margin])
+            company_obs.extend([company.capital, company.resilience, company.esg_score, company.cumu_mitigation_amount, company.cumu_resilience_amount, company.cumu_greenwash_amount, company.margin])
         # Collect investor observations
         investor_obs = []
         for investor in self.investors:
             investor_obs.extend(list(investor.investments.values()) + [investor.capital])
-        full_obs = np.array(company_obs + investor_obs)
+        climate_obs = [self.climate_event_probability, self.climate_event_occurrence, self.market_performance]
+        full_obs = np.array(company_obs + investor_obs + climate_obs)
 
         # Return the same observation for all agents
         return {agent: full_obs for agent in self.agents}
@@ -493,6 +494,7 @@ class InvestESG(ParallelEnv):
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
+        ax1.set_ylim(0, 150)
         ax2.set_ylabel('Climate Event Probability')
         ax2.set_ylim(0, 2)  # Set limits for Climate Event Probability
 
