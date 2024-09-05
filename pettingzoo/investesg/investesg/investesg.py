@@ -12,7 +12,7 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=6, climate_risk_exposure = 0.07, beta = 0.1667):
+    def __init__(self, capital=6, climate_risk_exposure = 0.07, beta = 0.1667, greenwash_esg_coef = 2):
         self.initial_capital = capital                      # initial capital, in trillion USD
         self.capital = capital                              # current capital, in trillion USD
         self.beta = beta                                    # Beta risk factor against market performance
@@ -31,7 +31,7 @@ class Company:
         self.capital_gain = 0                               # single period capital gain
         
         self.mitigation_pc = 0            # single period investment in emissions mitigation, in percentage of total capital
-        self.greenwash_pc = None                             # single period investment in greenwashing, in percentage of total capital
+        self.greenwash_pc = 0                             # single period investment in greenwashing, in percentage of total capital
         self.resilience_pc = 0                      # single period investment in resilience, in percentage of total capital
         
         self.mitigation_amount = 0        # amount of true emissions mitigation investment, in trillion USD
@@ -40,6 +40,8 @@ class Company:
         self.esg_score = 0                                  # signal to be broadcasted to investors: emissions mitigation investment / total capital,
                                                             # adjusted for greenwashing
         self.bankrupt = False
+
+        self.greenwash_esg_coef = greenwash_esg_coef       # coefficient of greenwashing_pc on ESG score
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -64,7 +66,7 @@ class Company:
         self.resilience = self.initial_resilience \
             * np.exp(-self.resilience_incr_rate * (self.cumu_resilience_amount/self.capital))
         ### update esg score
-        self.esg_score = self.mitigation_pc + self.greenwash_pc*2
+        self.esg_score = self.mitigation_pc + self.greenwash_pc*self.greenwash_esg_coef
 
 
     def update_capital(self, environment):
@@ -138,7 +140,7 @@ class Investor:
     
     def calculate_utility(self, environment):
         """Calculate reward based on market performance and ESG preferences."""
-        returns = 0
+        invest_balance = 0
         esg_reward = 0
         if self.capital == 0:
             self.utility = 0
@@ -147,13 +149,14 @@ class Investor:
                 if investment == 0:
                     continue
                 company = environment.companies[company_idx]
-                returns += investment # investment already includes returns
-                esg_reward += company.esg_score
+                invest_balance += investment # investment includes returns on capital and principal
+                esg_reward += company.esg_score*investment
 
-            period_profit = returns + self.cash - self.capital
-            utility = period_profit + self.esg_preference * esg_reward * 100 # scale up esg reward to percentage point so it is comparable to period profit
-            self.utility = utility
-            self.capital = self.cash + returns
+            new_capital = invest_balance + self.cash
+            avg_esg_reward = esg_reward / new_capital
+            profit_rate = (new_capital - self.capital) / self.capital
+            self.utility = profit_rate + self.esg_preference * avg_esg_reward
+            self.capital = new_capital
 
     def reset(self):
         """Reset the investor to the initial state."""
@@ -182,8 +185,7 @@ class InvestESG(ParallelEnv):
         market_performance_variance=0.0,
         allow_resilience_investment=False,
         allow_greenwash_investment=False,
-        action_capping=0.1,
-        **kwargs
+        action_capping=0.1
     ):
         self.max_steps = max_steps
         self.timestamp = 0
