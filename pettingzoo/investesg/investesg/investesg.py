@@ -221,6 +221,10 @@ class InvestESG(ParallelEnv):
         self.climate_event_probability = initial_climate_event_probability # current probability of climate event
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
         self.action_capping = action_capping # action capping for company action
+        self.climate_observable = climate_observable # whether to include climate data in the observation space
+        self.avg_esg_score_observable = avg_esg_score_observable # whethter to include company avg esg socre in the observation space
+        self.esg_spending_observable = esg_spending_observable # whether to include company esg spending (mitigation + greenwash spending) in the observation space
+        self.resilience_spending_observable = resilience_spending_observable # whether to include company resilience spending in the observation space
         # initialize investors with initial investments dictionary
         for investor in self.investors:
             investor.initial_investment(self)
