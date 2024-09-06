@@ -185,7 +185,8 @@ class InvestESG(ParallelEnv):
         market_performance_variance=0.0,
         allow_resilience_investment=False,
         allow_greenwash_investment=False,
-        action_capping=0.1
+        action_capping=0.1,
+        **kwargs
     ):
         self.max_steps = max_steps
         self.timestamp = 0
@@ -264,7 +265,7 @@ class InvestESG(ParallelEnv):
     def observation_space(self, agent):
         # all agents have access to the same information, namely the capital, climate resilience, ESG score, and margin of each company
         # of all companies and the investment in each company and remaining cash of each investor
-        observation_size = self.num_companies * 4 + self.num_investors * (self.num_companies + 1)
+        observation_size = self.num_companies * 7 + self.num_investors * (self.num_companies + 1) + 3
         observation_space = Box(low=-np.inf, high=np.inf, shape=(observation_size,))
         return observation_space
 
@@ -335,7 +336,7 @@ class InvestESG(ParallelEnv):
         for investor in self.investors:
             investor.update_investment_returns(self)
         # 6. investors calculate returns based on market performance
-        for investor in self.investors:
+        for i, investor in enumerate(self.investors):
             investor.calculate_utility(self)
 
         # 7. termination and truncation
@@ -399,13 +400,15 @@ class InvestESG(ParallelEnv):
         """Get observation for each company and investor. Public information is shared across all agents."""
         # Collect company observations
         company_obs = []
-        for company in self.companies:
-            company_obs.extend([company.capital, company.resilience, company.esg_score, company.margin])
+        for i, company in enumerate(self.companies):
+            avg_esg_score = np.mean(self.history["company_esg_score"][i]) if len(self.history["company_esg_score"][i]) else 0
+            company_obs.extend([company.capital, company.resilience, company.esg_score, avg_esg_score, company.cumu_mitigation_amount + company.cumu_greenwash_amount, company.cumu_resilience_amount, company.margin])
         # Collect investor observations
         investor_obs = []
         for investor in self.investors:
             investor_obs.extend(list(investor.investments.values()) + [investor.capital])
-        full_obs = np.array(company_obs + investor_obs)
+        climate_obs = [self.climate_event_probability, self.climate_event_occurrence, self.market_performance]
+        full_obs = np.array(company_obs + investor_obs + climate_obs)
 
         # Return the same observation for all agents
         return {agent: full_obs for agent in self.agents}
