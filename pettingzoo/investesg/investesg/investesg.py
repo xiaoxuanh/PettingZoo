@@ -186,6 +186,10 @@ class InvestESG(ParallelEnv):
         allow_resilience_investment=False,
         allow_greenwash_investment=False,
         action_capping=0.1,
+        climate_observable=False,
+        avg_esg_score_observable=False,
+        esg_spending_observable=False,
+        resilience_spending_observable=False,
         **kwargs
     ):
         self.max_steps = max_steps
@@ -401,13 +405,23 @@ class InvestESG(ParallelEnv):
         # Collect company observations
         company_obs = []
         for i, company in enumerate(self.companies):
-            avg_esg_score = np.mean(self.history["company_esg_score"][i]) if len(self.history["company_esg_score"][i]) else 0
-            company_obs.extend([company.capital, company.resilience, company.esg_score, avg_esg_score, company.cumu_mitigation_amount + company.cumu_greenwash_amount, company.cumu_resilience_amount, company.margin])
+            avg_esg_score = 0
+            esg_spending = 0
+            resilience_spending = 0
+            if self.avg_esg_score_observable:
+                avg_esg_score = np.mean(self.history["company_esg_score"][i]) if len(self.history["company_esg_score"][i]) else 0
+            if self.esg_spending_observable:
+                esg_spending = company.cumu_mitigation_amount + company.cumu_greenwash_amount
+            if self.resilience_spending_observable:
+                resilience_spending = company.cumu_resilience_amount
+            company_obs.extend([company.capital, company.resilience, company.margin, company.esg_score, avg_esg_score, esg_spending, resilience_spending])
         # Collect investor observations
         investor_obs = []
         for investor in self.investors:
             investor_obs.extend(list(investor.investments.values()) + [investor.capital])
-        climate_obs = [self.climate_event_probability, self.climate_event_occurrence, self.market_performance]
+        climate_obs = [0, 0, 0]
+        if self.climate_observable:
+            climate_obs = [self.climate_event_probability, self.climate_event_occurrence, self.market_performance]
         full_obs = np.array(company_obs + investor_obs + climate_obs)
 
         # Return the same observation for all agents
