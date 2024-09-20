@@ -12,7 +12,7 @@ import seaborn as sns
 import itertools
 
 class Company:
-    def __init__(self, capital=6, climate_risk_exposure = 0.07, beta = 0.1667, greenwash_esg_coef = 2):
+    def __init__(self, capital=6, climate_risk_exposure = 0.05, beta = 0.1667, greenwash_esg_coef = 2):
         self.initial_capital = capital                      # initial capital, in trillion USD
         self.capital = capital                              # current capital, in trillion USD
         self.beta = beta                                    # Beta risk factor against market performance
@@ -76,7 +76,7 @@ class Company:
         # ranges from 0.5 to 1.5 of market performance baseline most of time
         new_capital = self.capital * (1-self.mitigation_pc-self.resilience_pc-self.greenwash_pc) * company_performance
         if environment.climate_event_occurrence > 0:
-            new_capital *= (1 - self.resilience)**environment.climate_event_occurrence
+            new_capital *= (1 - self.resilience*environment.climate_event_occurrence)
 
         # calculate margin and capital gain
         self.capital_gain = new_capital - self.capital # ending capital - starting capital
@@ -179,8 +179,10 @@ class InvestESG(ParallelEnv):
         investor_attributes=None,
         num_companies=5,
         num_investors=5,
-        initial_climate_event_probability=0.5,
-        max_steps=100,
+        initial_heat_prob = 0.28,
+        initial_precip_prob = 0.13,
+        initial_drought_prob = 0.17,
+        max_steps=80,
         market_performance_baseline=1.1, 
         market_performance_variance=0.0,
         allow_resilience_investment=False,
@@ -217,9 +219,17 @@ class InvestESG(ParallelEnv):
         self.market_performance_variance = market_performance_variance # variance of market performance
         self.allow_resilience_investment = allow_resilience_investment # whether to allow resilience investment by companies
         self.allow_greenwash_investment = allow_greenwash_investment # whether to allow greenwash investment by companies
-        self.initial_climate_event_probability = initial_climate_event_probability # initial probability of climate event
-        self.climate_event_probability = initial_climate_event_probability # current probability of climate event
+
+        self.initial_heat_prob = initial_heat_prob # initial probability of heat wave
+        self.initial_precip_prob = initial_precip_prob # initial probability of precipitation
+        self.initial_drought_prob = initial_drought_prob # initial probability of drought
+        self.heat_prob = initial_heat_prob # current probability of heat wave
+        self.precip_prob = initial_precip_prob # current probability of precipitation
+        self.drought_prob = initial_drought_prob # current probability of drought
+        self.initial_climate_risk = 1 - (1-initial_heat_prob)*(1-initial_precip_prob)*(1-initial_drought_prob) # initial probability of at least one climate event
+        self.climate_risk = self.initial_climate_risk # current probability of climate event
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
+        
         self.action_capping = action_capping # action capping for company action
         self.climate_observable = climate_observable # whether to include climate data in the observation space
         self.avg_esg_score_observable = avg_esg_score_observable # whethter to include company avg esg socre in the observation space
@@ -280,9 +290,10 @@ class InvestESG(ParallelEnv):
     def step(self, actions):
         """Step function for the environment."""
 
-        ## Temporary Code: TO BE REMOVED LATER
-        rng1 = np.random.default_rng(self.timestamp)
-        rng2 = np.random.default_rng(self.timestamp*1000)
+        rng1 = np.random.default_rng(self.timestamp) # random number generator for market performance
+        rng_heat = np.random.default_rng(self.timestamp*100) # random number generator for climate event
+        rng_precip = np.random.default_rng(self.timestamp*500) # random number generator for climate event
+        rng_drought = np.random.default_rng(self.timestamp*1000) # random number generator for climate event
 
         ## unpack actions
         # first num_companies actions are for companies, the rest are for investors
@@ -329,12 +340,17 @@ class InvestESG(ParallelEnv):
 
         # 3. update probabilities of climate event based on cumulative ESG investments across companies
         total_mitigation_investment = np.sum(np.array([company.cumu_mitigation_amount for company in self.companies]))
-        self.climate_event_probability =  self.initial_climate_event_probability + 0.014*self.timestamp/(1+0.028*total_mitigation_investment)
+        self.heat_prob = self.initial_heat_prob + 0.0083*self.timestamp/(1+0.0222*total_mitigation_investment)
+        self.precip_prob = self.initial_precip_prob + 0.0018*self.timestamp/(1+0.0326*total_mitigation_investment)
+        self.drought_prob = self.initial_drought_prob + 0.003*self.timestamp/(1+0.038*total_mitigation_investment)
+        self.climate_risk = 1 - (1-self.heat_prob)*(1-self.precip_prob)*(1-self.drought_prob)
 
         # 4. market performance and climate event evolution
         self.market_performance = rng1.normal(loc=self.market_performance_baseline, scale=self.market_performance_variance)   # ranges from 0.9 to 1.1 most of time
-        # TODO: consider other distributions and time-correlation of market performance
-        self.climate_event_occurrence = int(self.climate_event_probability) + (rng2.random() < self.climate_event_probability % 1).astype(int)
+        heat_event = (rng_heat.random() < self.heat_prob).astype(int)
+        precip_event = (rng_precip.random() < self.precip_prob).astype(int)
+        drought_event = (rng_drought.random() < self.drought_prob).astype(int)
+        self.climate_event_occurrence = heat_event + precip_event + drought_event
 
         # 5. companies and investors update capital based on market performance and climate event
         for company in self.companies:
@@ -373,7 +389,10 @@ class InvestESG(ParallelEnv):
             investor.reset()
         self.agents = [f"company_{i}" for i in range(self.num_companies)] + [f"investor_{i}" for i in range(self.num_investors)]
         self.market_performance = 1
-        self.climate_event_probability = self.initial_climate_event_probability
+        self.heat_prob = self.initial_heat_prob
+        self.precip_prob = self.initial_precip_prob
+        self.drought_prob = self.initial_drought_prob
+        self.climate_risk = self.initial_climate_risk
         self.climate_event_occurrence = 0
         self.timestamp = 0
         # reset historical data
@@ -425,7 +444,7 @@ class InvestESG(ParallelEnv):
             investor_obs.extend(list(investor.investments.values()) + [investor.capital])
         climate_obs = [0, 0, 0]
         if self.climate_observable:
-            climate_obs = [self.climate_event_probability, self.climate_event_occurrence, self.market_performance]
+            climate_obs = [self.climate_risk, self.climate_event_occurrence, self.market_performance]
         full_obs = np.array(company_obs + investor_obs + climate_obs)
 
         # Return the same observation for all agents
@@ -450,7 +469,7 @@ class InvestESG(ParallelEnv):
         self.history["esg_investment"].append(sum(company.cumu_mitigation_amount for company in self.companies))
         self.history["greenwash_investment"].append(sum(company.cumu_greenwash_amount for company in self.companies))
         self.history["resilience_investment"].append(sum(company.cumu_resilience_amount for company in self.companies))
-        self.history["climate_risk"].append(self.climate_event_probability)
+        self.history["climate_risk"].append(self.climate_risk)
         self.history["climate_event_occurs"].append(self.climate_event_occurrence)
         self.history["market_performance"].append(self.market_performance)
         # at the end of the step investors haven't collected returns yet, so company capitals include returns for investors
@@ -516,8 +535,9 @@ class InvestESG(ParallelEnv):
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
+        ax1.set_ylim(0, 2000)
         ax2.set_ylabel('Climate Event Probability')
-        ax2.set_ylim(0, 2)  # Set limits for Climate Event Probability
+        ax2.set_ylim(0, 1)  # Set limits for Climate Event Probability
 
         ax1.legend(loc='upper left')
         ax2.legend(loc='upper right')
