@@ -1,3 +1,5 @@
+import json
+import random
 from pettingzoo import ParallelEnv
 from gym.spaces import Discrete, MultiDiscrete, Box, Dict, MultiBinary
 import functools
@@ -42,6 +44,7 @@ class Company:
         self.bankrupt = False
 
         self.greenwash_esg_coef = greenwash_esg_coef       # coefficient of greenwashing_pc on ESG score
+        print(self.__dict__)
 
     def receive_investment(self, amount):
         """Receive investment from investors."""
@@ -111,6 +114,7 @@ class Investor:
         self.investments = {}               # dictionary to track investments in different companies
         self.esg_preference = esg_preference # the weight of ESG in the investor's decision making
         self.utility = 0                     # single-period reward
+        self.profit_rate = 0                # single-period profit rate
     
     def initial_investment(self, environment):
         """Invest in all companies at the beginning of the simulation."""
@@ -151,10 +155,10 @@ class Investor:
                 company = environment.companies[company_idx]
                 invest_balance += investment # investment includes returns on capital and principal
                 esg_reward += company.esg_score*investment
-
             new_capital = invest_balance + self.cash
             avg_esg_reward = esg_reward / new_capital
             profit_rate = (new_capital - self.capital) / self.capital
+            self.profit_rate = profit_rate
             self.utility = profit_rate + self.esg_preference * avg_esg_reward
             self.capital = new_capital
 
@@ -244,6 +248,7 @@ class InvestESG(ParallelEnv):
             "company_climate_risk": [[] for _ in range(self.num_companies)],
             "investor_capitals": [[] for _ in range(self.num_investors)],
             "investor_utility": [[] for _ in range(self.num_investors)],
+            "investor_profit_rate": [[] for _ in range(self.num_investors)],
             "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
             "company_mitigation_amount": [[] for _ in range(self.num_companies)],
             "company_greenwash_amount": [[] for _ in range(self.num_companies)],
@@ -251,8 +256,9 @@ class InvestESG(ParallelEnv):
             "company_esg_score": [[] for _ in range(self.num_companies)],
             "company_margin": [[] for _ in range(self.num_companies)],
             "company_rewards": [[] for _ in range(self.num_companies)],
-            "investor_rewards": [[] for _ in range(self.num_investors)],
+            "investor_rewards": [[] for _ in range(self.num_investors)]
         }
+        print(json.dumps(self.__dict__, indent=4, default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>"))
 
 
     @functools.lru_cache(maxsize=None)
@@ -390,6 +396,7 @@ class InvestESG(ParallelEnv):
             "company_climate_risk": [[] for _ in range(self.num_companies)],
             "investor_capitals": [[] for _ in range(self.num_investors)],
             "investor_utility": [[] for _ in range(self.num_investors)],
+            "investor_profit_rate": [[] for _ in range(self.num_investors)],
             "investment_matrix": np.zeros((self.num_investors, self.num_companies)),
             "company_mitigation_amount": [[] for _ in range(self.num_companies)],
             "company_greenwash_amount": [[] for _ in range(self.num_companies)],
@@ -468,6 +475,7 @@ class InvestESG(ParallelEnv):
         for i, investor in enumerate(self.investors):
             self.history["investor_capitals"][i].append(investor.capital)
             self.history["investor_utility"][i].append(investor.utility)
+            self.history["investor_profit_rate"][i].append(investor.profit_rate)
             self.history["investor_rewards"][i].append(reward[f"investor_{i}"])
             for j, investment in investor.investments.items():
                 self.history["investment_matrix"][i, j] += investment
@@ -484,7 +492,7 @@ class InvestESG(ParallelEnv):
             # Initialize the plot only once
             self.fig = Figure(figsize=(32, 18))
             self.canvas = FigureCanvas(self.fig)
-            self.ax = self.fig.subplots(3, 4)  # Adjusted to 2 rows and 6 columns
+            self.ax = self.fig.subplots(3, 5)  # Adjusted to 2 rows and 6 columns
             plt.subplots_adjust(hspace=0.5, wspace=1)  # Increased wspace from 0.2 to 0.3
             plt.ion()  # Turn on interactive mode for plotting
 
@@ -516,6 +524,7 @@ class InvestESG(ParallelEnv):
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
+        ax1.set_ylim(0, 80)
         ax2.set_ylabel('Climate Event Probability')
         ax2.set_ylim(0, 2)  # Set limits for Climate Event Probability
 
@@ -579,16 +588,25 @@ class InvestESG(ParallelEnv):
         ax.set_xlabel('Timestep')
         ax.legend(loc='upper right')
 
+        # Subplot 7: Company ESG Score over time
+        ax = self.ax[1][3]
+        for i, margin in enumerate(self.history["company_margin"]):
+            ax.plot(margin, label=f'Company {i}', color=self.company_colors[i])
+        ax.set_title('Company Margin Over Time')
+        ax.set_ylabel('Margin')
+        ax.set_xlabel('Timestep')
+        ax.legend(loc='upper right')
+
         # Subplot 8: Investment Matrix
         investment_matrix = self.history["investment_matrix"]
-        ax = self.ax[1][3]
+        ax = self.ax[1][4]
         sns.heatmap(investment_matrix, ax=ax, cmap='Reds', cbar=True, annot=True, fmt='g')
 
         ax.set_title('Investment Matrix')
         ax.set_ylabel('Investor ID')
         ax.set_xlabel('Company ID')
 
-         # Subplot 9: Investor Capitals over time
+        # Subplot 9: Investor Capitals over time
         ax = self.ax[2][0]
         for i, capital_history in enumerate(self.history["investor_capitals"]):
             ax.plot(capital_history, label=f'Investor {i}', color=self.investor_colors[i])
@@ -597,8 +615,17 @@ class InvestESG(ParallelEnv):
         ax.set_xlabel('Timestep')
         ax.legend(loc='upper right')
 
-        # Subplot 10: Investor Utility over time
+        # Subplot 9: Investor Profit Rate over time
         ax = self.ax[2][1]
+        for i, profit_rate in enumerate(self.history["investor_profit_rate"]):
+            ax.plot(profit_rate, label=f'Investor {i}', color=self.investor_colors[i])
+        ax.set_title('Investor Profit Rate Over Time')
+        ax.set_ylabel('Profit Rate')
+        ax.set_xlabel('Timestep')
+        ax.legend(loc='upper right')
+
+        # Subplot 10: Investor Utility over time
+        ax = self.ax[2][2]
         for i, utility_history in enumerate(self.history["investor_utility"]):
             ax.plot(utility_history, label=f'Investor {i}', color=self.investor_colors[i])
         ax.set_title('Investor Utility Over Time')
@@ -607,7 +634,7 @@ class InvestESG(ParallelEnv):
         ax.legend(loc='upper right')
 
         # Subplot 11: Cumulative Investor Utility over time
-        ax = self.ax[2][2]
+        ax = self.ax[2][3]
         for i, utility_history in enumerate(self.history["investor_utility"]):
             cumulative_utility_history = list(itertools.accumulate(utility_history))
             ax.plot(cumulative_utility_history, label=f'Investor {i}', color=self.investor_colors[i])
@@ -617,7 +644,7 @@ class InvestESG(ParallelEnv):
         ax.legend(loc='upper right')
 
         # Subplot 12: Market Total Wealth over time
-        ax = self.ax[2][3]
+        ax = self.ax[2][4]
         ax.plot(self.history["market_total_wealth"], label='Total Wealth', color='green')
         ax.set_title('Market Total Wealth Over Time')
         ax.set_ylabel('Total Wealth')
