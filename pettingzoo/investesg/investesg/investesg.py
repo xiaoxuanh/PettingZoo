@@ -188,6 +188,7 @@ class InvestESG(ParallelEnv):
         allow_resilience_investment=False,
         allow_greenwash_investment=False,
         action_capping=0.1,
+        company_esg_score_observable=False,
         climate_observable=False,
         avg_esg_score_observable=False,
         esg_spending_observable=False,
@@ -231,6 +232,7 @@ class InvestESG(ParallelEnv):
         self.climate_event_occurrence = 0 # number of climate events occurred in the current step
         
         self.action_capping = action_capping # action capping for company action
+        self.company_esg_score_observable = company_esg_score_observable
         self.climate_observable = climate_observable # whether to include climate data in the observation space
         self.avg_esg_score_observable = avg_esg_score_observable # whethter to include company avg esg socre in the observation space
         self.esg_spending_observable = esg_spending_observable # whether to include company esg spending (mitigation + greenwash spending) in the observation space
@@ -431,13 +433,16 @@ class InvestESG(ParallelEnv):
             avg_esg_score = 0
             esg_spending = 0
             resilience_spending = 0
+            company_esg_score = 0
+            if self.company_esg_score_observable:
+                company_esg_score = company.esg_score
             if self.avg_esg_score_observable:
                 avg_esg_score = np.mean(self.history["company_esg_score"][i]) if len(self.history["company_esg_score"][i]) else 0
             if self.esg_spending_observable:
                 esg_spending = company.cumu_mitigation_amount + company.cumu_greenwash_amount
             if self.resilience_spending_observable:
                 resilience_spending = company.cumu_resilience_amount
-            company_obs.extend([company.capital, company.resilience, company.margin, company.esg_score, avg_esg_score, esg_spending, resilience_spending])
+            company_obs.extend([company.capital, company.resilience, company.margin, company_esg_score, avg_esg_score, esg_spending, resilience_spending])
         # Collect investor observations
         investor_obs = []
         for investor in self.investors:
@@ -535,7 +540,7 @@ class InvestESG(ParallelEnv):
         ax1.set_title('Overall Metrics Over Time')
         ax1.set_xlabel('Timestep')
         ax1.set_ylabel('Investment in ESG')
-        ax1.set_ylim(0, 2000)
+        ax1.set_ylim(0, 200)
         ax2.set_ylabel('Climate Event Probability')
         ax2.set_ylim(0, 1)  # Set limits for Climate Event Probability
 
