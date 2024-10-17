@@ -292,10 +292,10 @@ class InvestESG(ParallelEnv):
     def step(self, actions):
         """Step function for the environment."""
 
-        rng1 = np.random.default_rng(self.timestamp) # random number generator for market performance
-        rng_heat = np.random.default_rng(self.timestamp*100) # random number generator for climate event
-        rng_precip = np.random.default_rng(self.timestamp*500) # random number generator for climate event
-        rng_drought = np.random.default_rng(self.timestamp*1000) # random number generator for climate event
+        rng1 = np.random.default_rng() # random number generator for market performance
+        rng_heat = np.random.default_rng() # random number generator for climate event
+        rng_precip = np.random.default_rng() # random number generator for climate event
+        rng_drought = np.random.default_rng() # random number generator for climate event
 
         ## unpack actions
         # first num_companies actions are for companies, the rest are for investors
@@ -353,7 +353,8 @@ class InvestESG(ParallelEnv):
         precip_event = (rng_precip.random() < self.precip_prob).astype(int)
         drought_event = (rng_drought.random() < self.drought_prob).astype(int)
         self.climate_event_occurrence = heat_event + precip_event + drought_event
-
+        
+        
         # 5. companies and investors update capital based on market performance and climate event
         for company in self.companies:
             if company.bankrupt:
